@@ -11,10 +11,34 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-
-
 # Inject metric card styles
 style_metric_cards()
+
+def handle_rate_limit(e):
+    hours, remainder = divmod(e.retry_after, 3600)
+    minutes, _ = divmod(remainder, 60)
+    parts = []
+    if hours > 0:
+        parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
+    if minutes > 0:
+        parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+    if not parts:
+        parts.append(f"{e.retry_after} seconds")
+    time_str = " and ".join(parts)
+    
+    st.error(f"**Oops!** The Rosnet rate limit has been exceeded. Go touch some tables and come back in {time_str}.")
+    
+    # Attempt to load the user's provided picture
+    import os
+    if os.path.exists("rate_limit_exceeded.png"):
+        st.image("rate_limit_exceeded.png")
+    elif os.path.exists("rate_limit_exceeded.jpg"):
+        st.image("rate_limit_exceeded.jpg")
+    elif os.path.exists("rate_limit_exceeded.jpeg"):
+        st.image("rate_limit_exceeded.jpeg")
+        
+    st.stop()
+
 
 # --- Sidebar Filters ---
 st.sidebar.image("https://plus.unsplash.com/premium_photo-1661882196621-3e4cdb58dcf4?auto=format&fit=crop&q=80&w=300", 
@@ -82,9 +106,12 @@ with st.spinner("Loading Locations..."):
                         loc_map[l_id] = l_name
         if not loc_map:
             loc_map = {101: "Default Location (Mock)"}
+    except api.RateLimitExceeded as e:
+        handle_rate_limit(e)
     except Exception as e:
         st.sidebar.error("Could not fetch locations.")
         loc_map = {101: "Default Location (Mock)"}
+
 
 selected_locations = st.sidebar.multiselect(
     "Select Locations (Area Config)",
@@ -185,7 +212,14 @@ else:
     col_load = st.empty()
     with col_load:
         with st.spinner("Crunching table checks from Rosnet..."):
-            checks_df = load_check_data(start_date, end_date, selected_locations)
+            try:
+                checks_df = load_check_data(start_date, end_date, selected_locations)
+            except api.RateLimitExceeded as e:
+                handle_rate_limit(e)
+            except Exception as e:
+                st.error(f"Error fetching data: {e}")
+                st.stop()
+
 
 # --- Table Turns Focus ---
 st.markdown("### Specific Focus: Table Turns")

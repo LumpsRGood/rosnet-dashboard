@@ -14,6 +14,12 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+class RateLimitExceeded(Exception):
+    def __init__(self, retry_after):
+        self.retry_after = retry_after
+        super().__init__(f"Rate limited by Rosnet API. Retry after {retry_after} seconds.")
+
+
 # Try to get credentials from environment
 API_USER = os.getenv("ROSNET_API_USER")
 API_KEY = os.getenv("ROSNET_API_KEY")
@@ -64,10 +70,10 @@ def _make_request(endpoint, params=None):
             
             # Handle rate limits
             if response.status_code == 429:
-                retry_after = int(response.headers.get("Retry-After", 5))
-                logger.warning(f"Rate limited by Rosnet API. Retrying after {retry_after} seconds.")
-                time.sleep(retry_after)
-                continue
+                retry_after = int(response.headers.get("Retry-After", 3600))
+                logger.warning(f"Rate limited by Rosnet API. Retry after {retry_after} seconds.")
+                raise RateLimitExceeded(retry_after)
+
                 
             response.raise_for_status()
             data = response.json()
