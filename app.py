@@ -11,17 +11,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Premium Light Aesthetics
-st.markdown("""
-<style>
-/* App background */
-.stApp {
-    background-color: #f8fafc; /* Tailwind Slate 50 */
-    color: #0f172a; /* Tailwind Slate 900 */
-    font-family: 'Inter', sans-serif;
-}
-</style>
-""", unsafe_allow_html=True)
+
 
 # Inject metric card styles
 style_metric_cards()
