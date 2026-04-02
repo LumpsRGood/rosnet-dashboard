@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import api
 from components import style_metric_cards, render_table_turns, render_server_leaderboard
 st.set_page_config(
@@ -31,15 +32,50 @@ st.sidebar.image("https://plus.unsplash.com/premium_photo-1661882196621-3e4cdb58
 st.sidebar.header("Dashboard Filters")
 
 # Filter logic
-today = datetime.now().date()
+try:
+    # Anchor to Eastern Time to prevent UTC servers from rolling over 'today' prematurely
+    tz = ZoneInfo("America/New_York")
+    today = datetime.now(tz).date()
+except Exception:
+    today = datetime.now().date()
+    
 yesterday = today - timedelta(days=1)
-default_start = yesterday - timedelta(days=6)
 
-date_range = st.sidebar.date_input(
-    "Date Range",
-    value=(default_start, yesterday),
-    max_value=yesterday
-)
+date_method = st.sidebar.radio("Date Selection Method", ["Quick Select", "Custom Range"], horizontal=True)
+
+if date_method == "Quick Select":
+    quick_choice = st.sidebar.selectbox("Range", ["Yesterday", "Last 7 Days", "Last Week", "Last Month"])
+    
+    if quick_choice == "Yesterday":
+        start_date = end_date = yesterday
+    elif quick_choice == "Last 7 Days":
+        start_date = yesterday - timedelta(days=6)
+        end_date = yesterday
+    elif quick_choice == "Last Week":
+        # Monday to Sunday of previous week
+        start_date = yesterday - timedelta(days=yesterday.weekday() + 7)
+        end_date = start_date + timedelta(days=6)
+    elif quick_choice == "Last Month":
+        # First to last day of previous month
+        first_day_this_month = today.replace(day=1)
+        end_date = first_day_this_month - timedelta(days=1)
+        start_date = end_date.replace(day=1)
+        
+    st.sidebar.info(f"Selected: **{start_date.strftime('%b %d, %Y')}** to **{end_date.strftime('%b %d, %Y')}**")
+
+else:
+    date_range = st.sidebar.date_input(
+        "Custom Date Range",
+        value=(yesterday - timedelta(days=6), yesterday),
+        max_value=yesterday
+    )
+    start_date = end_date = yesterday
+    if isinstance(date_range, tuple) and len(date_range) == 2:
+        start_date, end_date = date_range
+    elif isinstance(date_range, tuple) and len(date_range) == 1:
+        start_date = end_date = date_range[0]
+    else:
+        start_date = end_date = date_range
 
 # Locations dropdown
 with st.spinner("Loading Locations..."):
@@ -67,12 +103,7 @@ selected_locations = st.sidebar.multiselect(
     default=[] # Do not autoselect sites to prevent unintentional API polling
 )
 
-# Process valid date selection
-start_date, end_date = default_start, yesterday
-if len(date_range) == 2:
-    start_date, end_date = date_range
-elif len(date_range) == 1:
-    start_date = end_date = date_range[0]
+# Dates are already fully processed by the date_method selection above
 
 # --- Dashboard Input Finalization ---
 st.sidebar.markdown("---")
