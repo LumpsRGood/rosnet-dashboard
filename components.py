@@ -266,17 +266,24 @@ def render_server_leaderboard(df: pd.DataFrame, key: str = None):
             align='left' # Guarantees strict left formatting
         )
     
-    fig.add_vline(
-        x=40, line_dash="dash", line_color="#22c55e", line_width=2,
-        annotation_text="<b>Peach Tree goal</b>", 
-        annotation_position="top left",
-        annotation_font=dict(size=20, color="#15803d") # Deep green, pronounced
+    # V-lines for goals
+    fig.add_vline(x=40, line_dash="dash", line_color="#22c55e", line_width=2)
+    fig.add_vline(x=45, line_dash="dash", line_color="#ef4444", line_width=2)
+    
+    # Place text directly above the plotting area to stop overlap with topmost bar
+    fig.add_annotation(
+        x=40, y=1.01, yref="paper",
+        text="<b>Peach Tree goal</b>", 
+        showarrow=False, 
+        xanchor="right", yanchor="bottom",
+        font=dict(size=20, color="#15803d")
     )
-    fig.add_vline(
-        x=45, line_dash="dash", line_color="#ef4444", line_width=2,
-        annotation_text="<b>IHOP goal</b>", 
-        annotation_position="top right",
-        annotation_font=dict(size=20, color="#b91c1c") # Deep red, pronounced
+    fig.add_annotation(
+        x=45, y=1.01, yref="paper",
+        text="<b>IHOP goal</b>", 
+        showarrow=False, 
+        xanchor="left", yanchor="bottom",
+        font=dict(size=20, color="#b91c1c")
     )
     
     fig.update_layout(
