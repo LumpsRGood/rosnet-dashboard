@@ -286,7 +286,6 @@ def render_server_leaderboard(df: pd.DataFrame, key: str = None):
         paper_bgcolor='rgba(0,0,0,0)',
         xaxis=dict(
             showgrid=True, 
-            gridcolor='rgba(0,0,0,0.1)', 
             title="Avg Turn Time (Minutes)",
             tickfont=dict(size=14),
             title_font=dict(size=16)
