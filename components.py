@@ -273,7 +273,7 @@ def render_server_leaderboard(df: pd.DataFrame, key: str = None):
     # Place text directly above the plotting area to stop overlap with topmost bar
     fig.add_annotation(
         x=40, y=1.01, yref="paper",
-        text="<b>Peach Tree goal</b>", 
+        text="<b>Peachtree Goal</b>", 
         showarrow=False, 
         xanchor="right", yanchor="bottom",
         font=dict(size=20, color="#15803d")
