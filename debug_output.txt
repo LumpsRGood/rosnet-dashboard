@@ -1,0 +1,2 @@
+Status: 200
+Response: [{"Id":406,"Name":"Sandy Springs","OpenDate":"2021-12-14","ClosedDate":null,"TimeZoneName":"America/New_York"},{"Id":409,"Name":"409-Jimmy Carter","OpenDate":"2022-10-30","ClosedDate":null,"TimeZoneName":"America/New_York"},{"Id":413,"Name":"ATL Clairmont","OpenDate":"2022-05-23","ClosedDate":null,"TimeZoneName":"America/New_York"},{"Id":426,"Name":"Cobb Parkway","OpenDate":"2021-05-23","ClosedDate":null,"TimeZoneName":"America/New_York"},{"Id":457,"Name":"Roswell","OpenDate":"2011-01-01","Close
