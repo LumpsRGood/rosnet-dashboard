@@ -225,7 +225,7 @@ tab1, tab2, tab3 = st.tabs(["⏱️ Daily Turn Times", "👨‍🍳 Server Perfo
 with tab1:
     st.markdown("### 🏢 Market Total")
     render_kpi_row(filtered_df, prefix="Market")
-    render_table_turns(filtered_df)
+    render_table_turns(filtered_df, key="market_total_turns")
     
     for i, loc in enumerate(unique_locs):
         st.markdown("---")
@@ -233,14 +233,14 @@ with tab1:
         loc_df = filtered_df[filtered_df['locationId'] == loc].copy()
         if not loc_df.empty:
             render_kpi_row(loc_df, prefix="Store")
-            render_table_turns(loc_df)
+            render_table_turns(loc_df, key=f"store_turns_{loc}")
         else:
             st.info("No qualitative check data available for this timeline.")
 
 with tab2:
     st.markdown("### 🏢 Market Total Leaderboard")
     render_kpi_row(filtered_df, prefix="Market")
-    render_server_leaderboard(filtered_df)
+    render_server_leaderboard(filtered_df, key="market_total_leaderboard")
     
     for i, loc in enumerate(unique_locs):
         st.markdown("---")
@@ -248,7 +248,7 @@ with tab2:
         loc_df = filtered_df[filtered_df['locationId'] == loc].copy()
         if not loc_df.empty:
             render_kpi_row(loc_df, prefix="Store")
-            render_server_leaderboard(loc_df)
+            render_server_leaderboard(loc_df, key=f"store_leaderboard_{loc}")
         else:
             st.info("No server data available for this timeline.")
 

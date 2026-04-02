@@ -2,6 +2,7 @@ import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
+import uuid
 
 def style_metric_cards():
     """
@@ -30,7 +31,7 @@ def style_metric_cards():
         </style>
     ''', unsafe_allow_html=True)
 
-def render_sales_chart(df: pd.DataFrame):
+def render_sales_chart(df: pd.DataFrame, key: str = None):
     """
     Renders a premium line chart for Sales Overview.
     If df has columns: 'businessDate' and 'netSales', 'driveThruSales'
@@ -81,10 +82,11 @@ def render_sales_chart(df: pd.DataFrame):
         hovermode="x unified"
     )
 
-    st.plotly_chart(fig, width="stretch")
+    unique_key = f"{key}_{uuid.uuid4().hex}" if key else uuid.uuid4().hex
+    st.plotly_chart(fig, use_container_width=True, key=unique_key)
 
 
-def render_labor_breakdown(df: pd.DataFrame):
+def render_labor_breakdown(df: pd.DataFrame, key: str = None):
     """
     Renders a bar chart for Labor Costs by Job Code.
     Requires columns: 'jobCode' and 'regularPay'
@@ -124,10 +126,11 @@ def render_labor_breakdown(df: pd.DataFrame):
         hovertemplate="<b>%{y}</b><br>Cost: $%{x:.2f}<extra></extra>"
     )
 
-    st.plotly_chart(fig, width="stretch")
+    unique_key = f"{key}_{uuid.uuid4().hex}" if key else uuid.uuid4().hex
+    st.plotly_chart(fig, use_container_width=True, key=unique_key)
 
 
-def render_inventory_treemap(df: pd.DataFrame):
+def render_inventory_treemap(df: pd.DataFrame, key: str = None):
     """
     Renders a treemap of inventory items based on on-hand value.
     Requires columns: 'category', 'productName', 'totalCost'
@@ -156,9 +159,10 @@ def render_inventory_treemap(df: pd.DataFrame):
         hovertemplate="<b>%{label}</b><br>Value: $%{value:.2f}<extra></extra>"
     )
 
-    st.plotly_chart(fig, width="stretch")
+    unique_key = f"{key}_{uuid.uuid4().hex}" if key else uuid.uuid4().hex
+    st.plotly_chart(fig, use_container_width=True, key=unique_key)
 
-def render_table_turns(df: pd.DataFrame):
+def render_table_turns(df: pd.DataFrame, key: str = None):
     """
     Renders an area chart showing average table turn time (minutes) per day.
     """
@@ -197,9 +201,10 @@ def render_table_turns(df: pd.DataFrame):
         hovertemplate="<b>%{x}</b><br>Avg Turn Time: %{y:.1f} mins<extra></extra>"
     )
 
-    st.plotly_chart(fig, width="stretch")
+    unique_key = f"{key}_{uuid.uuid4().hex}" if key else uuid.uuid4().hex
+    st.plotly_chart(fig, use_container_width=True, key=unique_key)
 
-def render_server_leaderboard(df: pd.DataFrame):
+def render_server_leaderboard(df: pd.DataFrame, key: str = None):
     """
     Renders the custom styled server performance leaderboard (Green/Yellow/Red).
     """
@@ -296,9 +301,11 @@ def render_server_leaderboard(df: pd.DataFrame):
         margin=dict(l=10, r=60, t=100, b=20) # Collapsed left padding
     )
 
+    unique_key = f"{key}_{uuid.uuid4().hex}" if key else uuid.uuid4().hex
     st.plotly_chart(
         fig, 
         use_container_width=True,
+        key=unique_key,
         config={
             'displayModeBar': True, # Keep it visible
             'toImageButtonOptions': {
