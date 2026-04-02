@@ -12,17 +12,18 @@ def style_metric_cards():
     st.markdown('''
         <style>
         div[data-testid="metric-container"] {
-            background: white;
-            border: 1px solid rgba(0, 0, 0, 0.1);
+            background-color: var(--secondary-background-color);
+            color: var(--text-color);
+            border: 1px solid var(--faint-text-color);
             padding: 20px;
             border-radius: 15px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
             transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
         div[data-testid="metric-container"]:hover {
             transform: translateY(-5px);
             box-shadow: 0 8px 15px rgba(0, 0, 0, 0.1);
-            border: 1px solid rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--faint-text-color);
         }
         /* Make the delta values pop */
         div[data-testid="stMetricDelta"] > div {
@@ -72,12 +73,12 @@ def render_sales_chart(df: pd.DataFrame, key: str = None):
 
     fig.update_layout(
         title="Revenue Tracking",
-        title_font=dict(size=22, family="Inter", color="#0f172a"),
+        title_font=dict(size=22, family="Inter"),
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
-        xaxis=dict(showgrid=False, title="", color="#334155"),
-        yaxis=dict(showgrid=True, gridcolor='rgba(0,0,0,0.1)', title="Sales ($)", color="#334155", tickprefix="$"),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color="#0f172a")),
+        xaxis=dict(showgrid=False, title=""),
+        yaxis=dict(showgrid=True, title="Sales ($)", tickprefix="$"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict()),
         margin=dict(l=20, r=20, t=60, b=20),
         hovermode="x unified"
     )
@@ -111,11 +112,11 @@ def render_labor_breakdown(df: pd.DataFrame, key: str = None):
 
     fig.update_layout(
         title="Labor Cost by Job Code",
-        title_font=dict(size=20, family="Inter", color="#0f172a"),
+        title_font=dict(size=20, family="Inter"),
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
-        xaxis=dict(showgrid=True, gridcolor='rgba(0,0,0,0.1)', color="#334155"),
-        yaxis=dict(showgrid=False, color="#334155"),
+        xaxis=dict(showgrid=True),
+        yaxis=dict(showgrid=False),
         coloraxis_showscale=False,
         margin=dict(l=20, r=40, t=60, b=20)
     )
@@ -149,7 +150,7 @@ def render_inventory_treemap(df: pd.DataFrame, key: str = None):
     
     fig.update_layout(
         title="Inventory Value Top Contributors",
-        title_font=dict(size=20, family="Inter", color="#0f172a"),
+        title_font=dict(size=20, family="Inter"),
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
         margin=dict(t=50, l=10, r=10, b=10)
@@ -186,11 +187,11 @@ def render_table_turns(df: pd.DataFrame, key: str = None):
     
     fig.update_layout(
         title="Average Daily Turn Time (Open to Close)",
-        title_font=dict(size=22, family="Inter", color="#0f172a"),
+        title_font=dict(size=22, family="Inter"),
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
-        xaxis=dict(showgrid=False, title="", color="#334155"),
-        yaxis=dict(showgrid=True, gridcolor='rgba(0,0,0,0.1)', title="Avg Time (Minutes)", color="#334155"),
+        xaxis=dict(showgrid=False, title=""),
+        yaxis=dict(showgrid=True, title="Avg Time (Minutes)"),
         margin=dict(l=20, r=20, t=60, b=20),
         hovermode="x unified"
     )
@@ -280,15 +281,15 @@ def render_server_leaderboard(df: pd.DataFrame, key: str = None):
     
     fig.update_layout(
         title="Eat-In Turn Time Leaderboard (Goal: <40m)",
-        title_font=dict(size=22, family="Inter", color="#0f172a"),
+        title_font=dict(size=22, family="Inter"),
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
         xaxis=dict(
             showgrid=True, 
             gridcolor='rgba(0,0,0,0.1)', 
             title="Avg Turn Time (Minutes)",
-            tickfont=dict(size=14, color="#64748b"),
-            title_font=dict(size=16, color="#0f172a")
+            tickfont=dict(size=14),
+            title_font=dict(size=16)
         ),
         yaxis=dict(
             type='category',     # Absolute Fix: Force strict category handling
