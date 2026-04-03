@@ -173,7 +173,7 @@ def get_employees_map(location_id):
             emp_map[e.get('LocationEmployeeId')] = e.get('Name')
     return emp_map
 
-def get_checks(start_date, end_date, location_id, emp_map=None):
+def get_checks(start_date, end_date, location_id, emp_map=None, bev_cat_ids=None):
     """Fetches full check details from live API to calculate table turns"""
     if MOCK_MODE:
         dates = pd.date_range(start_date, end_date).strftime("%Y-%m-%d").tolist()
@@ -195,6 +195,13 @@ def get_checks(start_date, end_date, location_id, emp_map=None):
                     payment = random.choices(["Credit Card", "Cash", "Gift Card"], weights=[0.75, 0.20, 0.05])[0]
                     server = random.choice(["Sarah J.", "Michael T.", "David R.", "Emma W.", "Chris L."])
                     
+                    net_sales = round(random.uniform(15, 120), 2)
+                    # Per-server bev tendency for realistic leaderboard differentiation
+                    _bev_base = {"Sarah J.": 0.22, "Michael T.": 0.14, "David R.": 0.20, "Emma W.": 0.26, "Chris L.": 0.11}
+                    base = _bev_base.get(server, 0.18)
+                    bev_pct = max(0, random.gauss(base, 0.06)) if order_type == "Eat In" else random.uniform(0, 0.03)
+                    bev_sales = round(net_sales * bev_pct, 2)
+                    
                     checks.append({
                         "businessDate": d,
                         "locationId": location_id,
@@ -206,7 +213,8 @@ def get_checks(start_date, end_date, location_id, emp_map=None):
                         "openTime": t.strftime("%H:%M:%S"),
                         "closeTime": t_close.strftime("%H:%M:%S"),
                         "guestCount": random.randint(1, 6),
-                        "netSales": round(random.uniform(15, 120), 2)
+                        "netSales": net_sales,
+                        "beverageSales": bev_sales
                     })
         return checks
         
@@ -245,7 +253,16 @@ def get_checks(start_date, end_date, location_id, emp_map=None):
             open_str = o_time.split('T')[-1] + ":00" if 'T' in o_time else "00:00:00"
             close_str = c_time.split('T')[-1] + ":00" if 'T' in c_time else "00:00:00"
             
-            net_sales = sum(item.get("SoldPrice", 0) for item in c.get('ItemsSold', []))
+            # Calculate sales breakdown from items (including beverage classification)
+            bev_sales = 0.0
+            net_sales = 0.0
+            for item in c.get('ItemsSold', []):
+                price = item.get('SoldPrice', 0)
+                net_sales += price
+                cat_id = item.get('ItemMajorCatId')
+                if bev_cat_ids and cat_id in bev_cat_ids:
+                    bev_sales += price
+
             if server == "Unknown Server" and net_sales == 0:
                 continue # Ghost Check / Voids
                 
@@ -260,7 +277,8 @@ def get_checks(start_date, end_date, location_id, emp_map=None):
                 "openTime": open_str,
                 "closeTime": close_str,
                 "guestCount": c.get("TrafficCount", 0),
-                "netSales": net_sales
+                "netSales": round(net_sales, 2),
+                "beverageSales": round(bev_sales, 2)
             })
         return normalized
     
@@ -281,3 +299,20 @@ def get_locations():
             {"id": 103, "name": "Suburban Drive-Thru"}
         ]
     return _make_request("/general/locations")
+
+def get_beverage_category_ids():
+    """Fetches major categories and returns set of IDs that represent beverages.
+    Checks IsBeerWineLiquor flag first, then falls back to name matching for
+    non-alcoholic beverage categories (e.g. IHOP's 'Beverages' category).
+    """
+    if MOCK_MODE:
+        return {3}  # Mock beverage category ID matching live IHOP config
+    categories = _make_request("/sales/definitions/majorCategories")
+    bev_ids = set()
+    if isinstance(categories, list):
+        for c in categories:
+            if c.get('IsBeerWineLiquor'):
+                bev_ids.add(c.get('Id'))
+            elif 'beverage' in c.get('Name', '').lower():
+                bev_ids.add(c.get('Id'))
+    return bev_ids
