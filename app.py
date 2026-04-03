@@ -14,6 +14,11 @@ st.set_page_config(
 # Inject metric card styles
 style_metric_cards()
 
+@st.dialog("Data Availability")
+def show_realtime_warning():
+    st.warning("Real-time data is not available.")
+    st.write("This data is historical only. Please change your date selection in the sidebar to a range ending yesterday or earlier.")
+
 def handle_rate_limit(e):
     hours, remainder = divmod(e.retry_after, 3600)
     minutes, _ = divmod(remainder, 60)
@@ -57,13 +62,15 @@ yesterday = today - timedelta(days=1)
 date_method = st.sidebar.radio("Choose Your Timeframe", ["Quick Select", "Custom Range"], horizontal=True)
 
 if date_method == "Quick Select":
-    quick_choice = st.sidebar.selectbox("Range", ["Yesterday", "Last 7 Days", "Last Week", "Last Month"])
+    quick_choice = st.sidebar.selectbox("Range", ["Yesterday", "Week to Date", "Last Week", "Last Month"])
     
     if quick_choice == "Yesterday":
         start_date = end_date = yesterday
-    elif quick_choice == "Last 7 Days":
-        start_date = yesterday - timedelta(days=6)
+    elif quick_choice == "Week to Date":
+        start_date = today - timedelta(days=today.weekday())
         end_date = yesterday
+        if start_date > end_date:
+            start_date = end_date
     elif quick_choice == "Last Week":
         # Monday to Sunday of previous week
         start_date = yesterday - timedelta(days=yesterday.weekday() + 7)
@@ -80,7 +87,7 @@ else:
     date_range = st.sidebar.date_input(
         "Custom Date Range",
         value=(yesterday - timedelta(days=6), yesterday),
-        max_value=yesterday
+        max_value=today
     )
     start_date = end_date = yesterday
     if isinstance(date_range, tuple) and len(date_range) == 2:
@@ -89,6 +96,11 @@ else:
         start_date = end_date = date_range[0]
     else:
         start_date = end_date = date_range
+
+    if start_date == today or end_date == today:
+        show_realtime_warning()
+        st.error("Real-time data is unavailable. Please adjust the Custom Date Range in the sidebar.")
+        st.stop()
 
 
 # Locations dropdown
