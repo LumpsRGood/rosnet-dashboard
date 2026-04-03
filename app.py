@@ -39,11 +39,10 @@ def handle_rate_limit(e):
         
     st.stop()
 
-
 # --- Sidebar Filters ---
-st.sidebar.image("logo.png", use_container_width=True)
-st.sidebar.caption("Rosnet Insights")
-st.sidebar.header("Dashboard Filters")
+st.sidebar.image("logo.png", width=140)
+st.sidebar.caption("Peachtree Partners Data Analysis")
+st.sidebar.header("Filter Selections Below")
 
 # Filter logic
 try:
@@ -55,7 +54,7 @@ except Exception:
     
 yesterday = today - timedelta(days=1)
 
-date_method = st.sidebar.radio("Date Selection Method", ["Quick Select", "Custom Range"], horizontal=True)
+date_method = st.sidebar.radio("Choose Your Timeframe", ["Quick Select", "Custom Range"], horizontal=True)
 
 if date_method == "Quick Select":
     quick_choice = st.sidebar.selectbox("Range", ["Yesterday", "Last 7 Days", "Last Week", "Last Month"])
