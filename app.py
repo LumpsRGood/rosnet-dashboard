@@ -125,7 +125,7 @@ selected_locations = st.sidebar.multiselect(
 # Dates are finalized by the date selection above
 
 # --- Main Content ---
-st.title("Area Director Pulse 📈")
+st.title("*Almost* Live Rosnet Turn and Beverage Data 📈")
 st.warning("🚧 **Under Development:** This dashboard is currently in active testing. Errors may occasionally occur. Please contact **Chad** with any issues, feedback, or UI suggestions.")
 
 if api.MOCK_MODE:
