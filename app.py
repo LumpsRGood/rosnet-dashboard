@@ -114,7 +114,7 @@ with st.spinner("Loading Locations..."):
 
 
 selected_locations = st.sidebar.multiselect(
-    "Select Locations (Area Config)",
+    "Choose Your Location(s)",
     options=list(loc_map.keys()),
     format_func=lambda x: f"{x} - {loc_map.get(x, 'Unknown')}",
     default=[] # Do not autoselect sites to prevent unintentional API polling
