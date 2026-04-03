@@ -179,15 +179,22 @@ def _normalize_df(data):
         df.columns = [c[0].lower() + c[1:] for c in df.columns]
     return df
 
-@st.cache_data(ttl=600) # Cache for 10 minutes to prevent API spam
+@st.cache_data(ttl=3600)
+def get_cached_bev_cats():
+    return api.get_beverage_category_ids()
+
+@st.cache_data(ttl=600) # Cache per location to prevent redundant calls on retry
+def load_single_location(sd_str, ed_str, loc_id, bev_cat_ids):
+    emp_map = api.get_employees_map(loc_id)
+    return api.get_checks(sd_str, ed_str, loc_id, emp_map=emp_map, bev_cat_ids=bev_cat_ids)
+
 def load_check_data(sd, ed, locs):
     sd_str = sd.strftime("%Y-%m-%d")
     ed_str = ed.strftime("%Y-%m-%d")
-    bev_cat_ids = api.get_beverage_category_ids()
+    bev_cat_ids = get_cached_bev_cats()
     all_checks = []
     for loc_id in locs:
-        emp_map = api.get_employees_map(loc_id)
-        checks_data = api.get_checks(sd_str, ed_str, loc_id, emp_map=emp_map, bev_cat_ids=bev_cat_ids)
+        checks_data = load_single_location(sd_str, ed_str, loc_id, bev_cat_ids)
         if checks_data:
             all_checks.extend(checks_data)
     return _normalize_df(all_checks)
