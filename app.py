@@ -14,24 +14,21 @@ st.set_page_config(
 # Inject metric card styles
 style_metric_cards()
 
+APP_VERSION = "v1.1.0"
+
 @st.dialog("Data Availability")
 def show_realtime_warning():
     st.warning("Real-time data is not available.")
     st.write("This data is historical only. Please change your date selection in the sidebar to a range ending yesterday or earlier.")
 
+@st.dialog("Rate Limit Refreshing 🚦")
 def handle_rate_limit(e):
-    hours, remainder = divmod(e.retry_after, 3600)
-    minutes, _ = divmod(remainder, 60)
-    parts = []
-    if hours > 0:
-        parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
-    if minutes > 0:
-        parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
-    if not parts:
-        parts.append(f"{e.retry_after} seconds")
-    time_str = " and ".join(parts)
+    import time
+    retry_after = e.retry_after
     
-    st.error(f"**Oops!** The Rosnet rate limit has been exceeded. Go touch some tables and come back in {time_str}.")
+    st.warning("**Oops!** The Rosnet rate limit has been exceeded.")
+    st.write("But don't worry, the app will automatically retry once the rate limit refreshes.")
+    st.error("⚠️ **Please do not navigate away or change your selection while waiting.**")
     
     # Attempt to load the user's provided picture
     import os
@@ -42,11 +39,37 @@ def handle_rate_limit(e):
     elif os.path.exists("rate_limit_exceeded.jpeg"):
         st.image("rate_limit_exceeded.jpeg")
         
-    st.stop()
+    progress_text = st.empty()
+    progress_bar = st.progress(0)
+    
+    for i in range(retry_after, 0, -1):
+        hours, remainder = divmod(i, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        parts = []
+        if hours > 0:
+            parts.append(f"{hours}h")
+        if minutes > 0:
+            parts.append(f"{minutes}m")
+        parts.append(f"{seconds}s")
+        time_str = " ".join(parts)
+        
+        progress_text.text(f"Retrying in {time_str}...")
+        pct = max(0.0, min(1.0, 1.0 - (i / max(retry_after, 1))))
+        progress_bar.progress(pct)
+        time.sleep(1)
+        
+    progress_text.text("Retrying now...")
+    progress_bar.progress(1.0)
+    time.sleep(1)
+    st.rerun()
 
 # --- Sidebar Filters ---
-st.sidebar.image("logo.png", width=140)
-st.sidebar.caption("Peachtree Partners Data Analysis")
+sidebar_col1, sidebar_col2, sidebar_col3 = st.sidebar.columns([1, 1.5, 1])
+with sidebar_col2:
+    st.image("logo.png", use_container_width=True)
+
+st.sidebar.markdown("<p style='text-align: center; color: gray; font-size: 0.9em; margin-top: -10px;'>Peachtree Partners Data Analysis</p>", unsafe_allow_html=True)
+st.sidebar.markdown(f"<p style='text-align: center; color: gray; font-size: 0.7em; margin-top: -15px;'>{APP_VERSION}</p>", unsafe_allow_html=True)
 st.sidebar.header("Filter Selections Below")
 
 # Filter logic
@@ -291,5 +314,5 @@ with tab3:
         st.info("No raw data available to summarize.")
     
 # Footer
-st.markdown("<br><hr><center><small>Powered by Rosnet API | Data retrieved automatically</small></center>", unsafe_allow_html=True)
+st.markdown(f"<br><hr><center><small>Powered by Rosnet API | Data retrieved automatically | {APP_VERSION}</small></center>", unsafe_allow_html=True)
 
