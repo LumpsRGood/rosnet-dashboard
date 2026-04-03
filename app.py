@@ -251,15 +251,24 @@ with tab1:
             st.info("No qualitative check data available for this timeline.")
 
 with tab2:
+    # Build a human-readable date range for the WhatsApp card header
+    if start_date == end_date:
+        _date_str = start_date.strftime("%b %d, %Y")
+    else:
+        _date_str = f"{start_date.strftime('%b %d')} – {end_date.strftime('%b %d, %Y')}"
+
     st.markdown("### 🏢 Market Total Leaderboard")
-    render_combined_leaderboard(filtered_df, key="market_total_leaderboard")
+    _market_title = "Market Total" if len(unique_locs) > 1 else (store_names[0] if store_names else "Market Total")
+    render_combined_leaderboard(filtered_df, key="market_total_leaderboard",
+                                title=_market_title, date_range_str=_date_str)
     
     for i, loc in enumerate(unique_locs):
         st.markdown("---")
         st.markdown(f"#### 📍 {store_names[i]}")
         loc_df = filtered_df[filtered_df['locationId'] == loc].copy()
         if not loc_df.empty:
-            render_combined_leaderboard(loc_df, key=f"store_leaderboard_{loc}")
+            render_combined_leaderboard(loc_df, key=f"store_leaderboard_{loc}",
+                                        title=store_names[i], date_range_str=_date_str)
         else:
             st.info("No server data available for this timeline.")
 

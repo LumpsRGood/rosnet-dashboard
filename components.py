@@ -339,7 +339,7 @@ def render_server_leaderboard(df: pd.DataFrame, key: str = None):
         }
     )
 
-def render_combined_leaderboard(df: pd.DataFrame, key: str = None):
+def render_combined_leaderboard(df: pd.DataFrame, key: str = None, title: str = None, date_range_str: str = None):
     """
     Renders combined server performance leaderboard with Turn Time and Dine In Bev %.
     Design: Option C KPI cards (3 across, dynamically colored) + Option A table (solid cell colors).
@@ -476,16 +476,18 @@ def render_combined_leaderboard(df: pd.DataFrame, key: str = None):
     st.markdown(table_html, unsafe_allow_html=True)
 
     # --- WhatsApp Card Download (matplotlib PNG) ---
-    card_label = key or 'scorecard'
+    card_title = title or key or 'Scorecard'
+    card_dates = date_range_str or ''
     fig = _create_whatsapp_card(
-        card_label, server_stats, overall_turn, overall_bev,
+        card_title, card_dates, server_stats, overall_turn, overall_bev,
         best_turn, worst_turn, best_bev, worst_bev,
+        all_green, total_servers,
     )
     buf = BytesIO()
     fig.savefig(buf, format='png', dpi=200, bbox_inches='tight', facecolor='white')
     buf.seek(0)
     plt.close(fig)
-    safe_label = card_label.replace(' ', '_').replace('-', '_')
+    safe_label = (title or key or 'scorecard').replace(' ', '_').replace('-', '_')
     st.download_button(
         label=f"📲 Download WhatsApp Card",
         data=buf,
@@ -501,9 +503,10 @@ def _wrap_names(text, width=22):
     return "\n".join(textwrap.wrap(text, width=width, break_long_words=False))
 
 
-def _create_whatsapp_card(label, server_stats, overall_turn, overall_bev,
-                           best_turn, worst_turn, best_bev, worst_bev):
-    """Generates a matplotlib figure matching the user's existing WhatsApp card style."""
+def _create_whatsapp_card(label, date_range_str, server_stats, overall_turn, overall_bev,
+                           best_turn, worst_turn, best_bev, worst_bev,
+                           all_green, total_servers):
+    """Generates a matplotlib figure with 3 KPI lanes (Turn, Bev, All-Green) and colored table."""
     # Prepare export data
     export_df = server_stats[['serverName', 'avgTurn', 'bevPct']].copy()
     export_df.columns = ['Server', 'Turn Time', 'Dine In Bev %']
@@ -511,7 +514,7 @@ def _create_whatsapp_card(label, server_stats, overall_turn, overall_bev,
     export_df['Dine In Bev %'] = export_df['Dine In Bev %'].apply(lambda x: f"{x:.2f}%")
 
     row_count = len(export_df)
-    fig_height = max(8.0, 4.8 + (row_count * 0.48))
+    fig_height = max(9.0, 5.6 + (row_count * 0.48))
     fig, ax = plt.subplots(figsize=(7.5, fig_height))
     fig.patch.set_facecolor('white')
     ax.set_axis_off()
@@ -523,24 +526,32 @@ def _create_whatsapp_card(label, server_stats, overall_turn, overall_bev,
         edgecolor='#d7dee8', linewidth=1.2, zorder=0
     ))
 
-    # Header bar (IHOP blue)
+    # Header bar (IHOP blue) — taller to fit title + date subtitle
+    header_h = 0.10
+    header_y = 0.89
     ax.add_patch(Rectangle(
-        (0.01, 0.91), 0.98, 0.08,
+        (0.01, header_y), 0.98, header_h,
         transform=ax.transAxes, facecolor='#1d4f91',
         edgecolor='#1d4f91', zorder=1
     ))
     ax.text(
-        0.03, 0.95, label,
+        0.03, header_y + header_h - 0.025, label,
         transform=ax.transAxes, fontsize=17, fontweight='bold',
-        color='white', va='center', zorder=2
+        color='white', va='top', zorder=2
     )
+    if date_range_str:
+        ax.text(
+            0.03, header_y + 0.018, date_range_str,
+            transform=ax.transAxes, fontsize=10, fontstyle='italic',
+            color='#b0c4de', va='bottom', zorder=2
+        )
 
-    # --- KPI Lanes ---
-    lane_y = 0.68
+    # --- KPI Lanes (3 across: Turn, Bev, All-Green) ---
+    lane_y = 0.66
     lane_h = 0.19
-    lane_w = 0.45
-    lane_gap = 0.04
-    lane_xs = [0.03, 0.03 + lane_w + lane_gap]
+    lane_gap = 0.02
+    lane_w = (0.94 - 2 * lane_gap) / 3
+    lane_xs = [0.03, 0.03 + lane_w + lane_gap, 0.03 + 2 * (lane_w + lane_gap)]
 
     def turn_box_color(x):
         if pd.isna(x): return '#f5f8fc'
@@ -555,52 +566,58 @@ def _create_whatsapp_card(label, server_stats, overall_turn, overall_bev,
         return '#ff6b6b'
 
     def box_text_color(fill):
-        return 'white' if fill in ['#ff6b6b', '#1d4f91'] else '#222222'
+        return 'white' if fill in ['#ff6b6b', '#1d4f91', '#a855f7'] else '#222222'
 
-    lane_data = [
-        (
-            'TURN', 'Avg Turn',
-            f'{overall_turn:.2f}',
-            'Best', _wrap_names(best_turn['serverName']),
-            'Slowest', _wrap_names(worst_turn['serverName']),
-            turn_box_color(overall_turn),
-        ),
-        (
-            'BEVERAGE', 'Avg Dine In Bev %',
-            f'{overall_bev:.2f}%',
-            'Top', _wrap_names(best_bev['serverName']),
-            'Bottom', _wrap_names(worst_bev['serverName']),
-            bev_box_color(overall_bev),
-        ),
-    ]
-
-    for lane_x, lane in zip(lane_xs, lane_data):
-        title, avg_label, avg_value, label1, value1, label2, value2, fill_color = lane
+    def _draw_kpi_lane(ax, x, y, w, h, title_text, subtitle_text, value_text,
+                       detail1, detail2, fill_color):
         text_color = box_text_color(fill_color)
-
         ax.add_patch(Rectangle(
-            (lane_x, lane_y), lane_w, lane_h,
+            (x, y), w, h,
             transform=ax.transAxes, facecolor=fill_color,
             edgecolor='#cfd9e6', linewidth=1, zorder=1
         ))
-        ax.text(lane_x + 0.015, lane_y + lane_h - 0.025, title,
-                transform=ax.transAxes, fontsize=11, fontweight='bold',
+        ax.text(x + 0.01, y + h - 0.02, title_text,
+                transform=ax.transAxes, fontsize=9.5, fontweight='bold',
                 color=text_color, va='top', zorder=2)
-        ax.text(lane_x + 0.015, lane_y + lane_h - 0.055, avg_label,
-                transform=ax.transAxes, fontsize=8.8, color=text_color,
+        ax.text(x + 0.01, y + h - 0.048, subtitle_text,
+                transform=ax.transAxes, fontsize=7.5, color=text_color,
                 va='top', zorder=2)
-        ax.text(lane_x + 0.015, lane_y + lane_h - 0.082, avg_value,
-                transform=ax.transAxes, fontsize=12, fontweight='bold',
+        ax.text(x + 0.01, y + h - 0.073, value_text,
+                transform=ax.transAxes, fontsize=13, fontweight='bold',
                 color=text_color, va='top', zorder=2)
-        ax.text(lane_x + 0.015, lane_y + lane_h - 0.118, f"{label1}: {value1}",
-                transform=ax.transAxes, fontsize=8.4, color=text_color,
+        ax.text(x + 0.01, y + h - 0.115, detail1,
+                transform=ax.transAxes, fontsize=7.2, color=text_color,
                 va='top', zorder=2)
-        ax.text(lane_x + 0.015, lane_y + lane_h - 0.162, f"{label2}: {value2}",
-                transform=ax.transAxes, fontsize=8.4, color=text_color,
+        ax.text(x + 0.01, y + h - 0.15, detail2,
+                transform=ax.transAxes, fontsize=7.2, color=text_color,
                 va='top', zorder=2)
 
+    # Lane 1: Turn Time
+    _draw_kpi_lane(ax, lane_xs[0], lane_y, lane_w, lane_h,
+                   'TURN', 'Avg Turn',
+                   f'{overall_turn:.2f}',
+                   f'Best: {_wrap_names(best_turn["serverName"], 18)}',
+                   f'Slow: {_wrap_names(worst_turn["serverName"], 18)}',
+                   turn_box_color(overall_turn))
+
+    # Lane 2: Beverage %
+    _draw_kpi_lane(ax, lane_xs[1], lane_y, lane_w, lane_h,
+                   'BEVERAGE', 'Avg Dine In Bev %',
+                   f'{overall_bev:.2f}%',
+                   f'Top: {_wrap_names(best_bev["serverName"], 18)}',
+                   f'Bot: {_wrap_names(worst_bev["serverName"], 18)}',
+                   bev_box_color(overall_bev))
+
+    # Lane 3: All-Green (always purple)
+    _draw_kpi_lane(ax, lane_xs[2], lane_y, lane_w, lane_h,
+                   'ALL-GREEN', 'Turn ≤40m & Bev ≥19%',
+                   f'{all_green} of {total_servers}',
+                   'Servers meeting both',
+                   'performance thresholds',
+                   '#a855f7')
+
     # --- Data Table ---
-    table_bbox = [0.03, 0.04, 0.94, 0.60]
+    table_bbox = [0.03, 0.04, 0.94, 0.58]
     table = ax.table(
         cellText=export_df.values,
         colLabels=export_df.columns,
