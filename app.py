@@ -14,7 +14,7 @@ st.set_page_config(
 # Inject metric card styles
 style_metric_cards()
 
-APP_VERSION = "v1.1.0"
+APP_VERSION = "v1.1.1"
 
 @st.dialog("Data Availability")
 def show_realtime_warning():
