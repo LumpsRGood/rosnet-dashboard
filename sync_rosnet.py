@@ -202,30 +202,36 @@ def fetch_store_day(store_id, day_str, emp_map, bev_ids):
 
 
 def transform_checks(df, store_id, day_str):
-    """
-    Expecting columns like:
-    - serverName
-    - checkNumber
-    - netSales
-    - beverageSales
-    - turn_time
-    """
     if df.empty:
         return pd.DataFrame()
 
-    required = {"serverName", "checkNumber", "netSales", "beverageSales", "turn_time"}
+    required = {"serverName", "checkNumber", "netSales", "beverageSales", "openTime", "closeTime"}
     missing = required - set(df.columns)
     if missing:
         print(f"    skipped, missing columns: {sorted(missing)}")
         return pd.DataFrame()
 
+    # Clean + prepare
     df = df.dropna(
-        subset=["serverName", "checkNumber", "netSales", "beverageSales", "turn_time"]
+        subset=["serverName", "checkNumber", "netSales", "beverageSales", "openTime", "closeTime"]
     ).copy()
 
     if df.empty:
         return pd.DataFrame()
 
+    # --- 🔥 CALCULATE TURN TIME ---
+    df["openTime"] = pd.to_datetime(df["openTime"], errors="coerce")
+    df["closeTime"] = pd.to_datetime(df["closeTime"], errors="coerce")
+
+    df["turn_time"] = (df["closeTime"] - df["openTime"]).dt.total_seconds() / 60
+
+    # Remove bad data
+    df = df[df["turn_time"] > 0]
+
+    if df.empty:
+        return pd.DataFrame()
+
+    # --- GROUP ---
     grouped = (
         df.groupby("serverName", dropna=False)
         .agg(
@@ -237,16 +243,14 @@ def transform_checks(df, store_id, day_str):
         .reset_index()
     )
 
+    # --- METRICS ---
     grouped["ppa"] = grouped["sales"] / grouped["check_count"]
     grouped["beverage_pct"] = (
         (grouped["beverage_sales"] / grouped["sales"])
-        .replace([pd.NA, pd.NaT], 0)
-        .fillna(0)
-        * 100
+        .fillna(0) * 100
     )
 
-    # Stable placeholder employee id.
-    # Later, if your payload gives a real employee id, replace this.
+    # Stable employee ID
     grouped["employee_id"] = (
         grouped["serverName"]
         .fillna("")
@@ -266,7 +270,6 @@ def transform_checks(df, store_id, day_str):
             "sales",
         ]
     ]
-
 
 def upsert_grouped_rows(conn, grouped_df, store_id, business_date):
     cur = conn.cursor()
