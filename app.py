@@ -3,6 +3,7 @@ import pandas as pd
 import psycopg2
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+
 import api
 from components import style_metric_cards, render_table_turns, render_combined_leaderboard
 
@@ -15,7 +16,8 @@ st.set_page_config(
 
 style_metric_cards()
 
-APP_VERSION = "v1.2.1"
+APP_VERSION = "v1.2.2"
+
 
 @st.dialog("Data Availability")
 def show_realtime_warning():
@@ -23,6 +25,7 @@ def show_realtime_warning():
     st.write(
         "This data is historical only. Please change your date selection in the sidebar to a range ending yesterday or earlier."
     )
+
 
 # --- Sidebar Filters ---
 sidebar_col1, sidebar_col2, sidebar_col3 = st.sidebar.columns([1, 1.5, 1])
@@ -39,7 +42,8 @@ st.sidebar.markdown(
 )
 st.sidebar.header("Filter Selections Below")
 
-# --- Dates ---
+
+# --- Date logic ---
 try:
     tz = ZoneInfo("America/New_York")
     today = datetime.now(tz).date()
@@ -86,7 +90,7 @@ else:
     date_range = st.sidebar.date_input(
         "Custom Date Range",
         value=(yesterday - timedelta(days=6), yesterday),
-        max_value=yesterday,  # today is NOT valid
+        max_value=yesterday,
     )
 
     if isinstance(date_range, tuple) and len(date_range) == 2:
@@ -101,35 +105,28 @@ else:
         st.error("Real-time data is unavailable. Please adjust the Custom Date Range in the sidebar.")
         st.stop()
 
-# --- Locations dropdown ---
+
+# --- Dynamic locations from Rosnet only ---
 with st.spinner("Loading Locations..."):
     try:
         raw_locations = api.get_locations()
         loc_map = {}
         if isinstance(raw_locations, list):
             for loc in raw_locations:
-                if loc:
-                    l_id = loc.get("Id", loc.get("id"))
-                    l_name = loc.get("Name", loc.get("name", "Unknown"))
-                    if l_id is not None:
-                        loc_map[l_id] = l_name
+                if not loc:
+                    continue
+                l_id = loc.get("Id", loc.get("id"))
+                l_name = loc.get("Name", loc.get("name", "Unknown"))
+                if l_id is not None:
+                    loc_map[int(l_id)] = l_name
 
         if not loc_map:
-            loc_map = {
-                3231: "Prattville",
-                4445: "Montgomery",
-                4456: "Oxford",
-                4463: "Decatur",
-            }
+            st.sidebar.error("Could not load locations from Rosnet.")
+            st.stop()
 
-    except Exception:
-        # fallback if Rosnet location lookup acts up
-        loc_map = {
-            3231: "Prattville",
-            4445: "Montgomery",
-            4456: "Oxford",
-            4463: "Decatur",
-        }
+    except Exception as e:
+        st.sidebar.error(f"Could not load locations from Rosnet: {e}")
+        st.stop()
 
 selected_locations = st.sidebar.multiselect(
     "Choose Your Location(s)",
@@ -138,7 +135,6 @@ selected_locations = st.sidebar.multiselect(
     default=[],
 )
 
-# --- Main Content ---
 st.title("*Almost* Live Rosnet Turn and Beverage Data 📈")
 st.warning(
     "🚧 **Under Development:** This dashboard is currently in active testing. Errors may occasionally occur. Please contact **Chad** with any issues, feedback, or UI suggestions."
@@ -148,7 +144,8 @@ if len(selected_locations) == 0:
     st.info("👋 **Welcome to Rosnet Insights!**\n\nPlease select one or more locations from the sidebar to begin your analysis.")
     st.stop()
 
-# --- DB Data Load ---
+
+# --- Database helpers ---
 def get_db_connection():
     return psycopg2.connect(
         host=st.secrets["database"]["host"],
@@ -158,22 +155,27 @@ def get_db_connection():
         password=st.secrets["database"]["password"],
     )
 
+
 @st.cache_data(ttl=300)
 def get_data_from_db(start_date, end_date, locations):
     conn = get_db_connection()
+    locations = [int(x) for x in locations]
+
+    query = """
+        SELECT *
+        FROM employee_daily_metrics
+        WHERE store_number = ANY(%s::bigint[])
+          AND business_date BETWEEN %s AND %s
+        ORDER BY business_date, store_number, employee_name
+    """
+
     try:
-        query = """
-            SELECT *
-            FROM employee_daily_metrics
-            WHERE store_number = ANY(%s)
-              AND business_date BETWEEN %s AND %s
-            ORDER BY business_date, store_number, employee_name
-        """
         df = pd.read_sql(query, conn, params=(locations, start_date, end_date))
     finally:
         conn.close()
 
     return df
+
 
 with st.spinner("Loading stored Rosnet data..."):
     try:
@@ -185,11 +187,16 @@ with st.spinner("Loading stored Rosnet data..."):
 if checks_df.empty:
     st.warning(
         f"No data found for {start_date.strftime('%b %d, %Y')} to {end_date.strftime('%b %d, %Y')} "
-        f"for the selected location(s). Make sure those dates have been synced into Supabase."
+        f"for the selected location(s). Make sure those dates and locations have been synced into Supabase."
     )
+    with st.expander("Debug details"):
+        st.write("Selected locations:", selected_locations)
+        st.write("Available location labels:", {k: loc_map[k] for k in selected_locations if k in loc_map})
+        st.write("Date range:", start_date, "to", end_date)
     st.stop()
 
-# --- Map DB schema to existing component expectations ---
+
+# --- Translate DB schema to component expectations ---
 filtered_df = checks_df.rename(
     columns={
         "employee_name": "serverName",
@@ -202,12 +209,25 @@ filtered_df = checks_df.rename(
     }
 ).copy()
 
-# normalize types
+# Normalize types
+filtered_df["locationId"] = pd.to_numeric(filtered_df["locationId"], errors="coerce").astype("Int64")
 filtered_df["businessDate"] = pd.to_datetime(filtered_df["businessDate"], errors="coerce").dt.date
 filtered_df["turnTimeMinutes"] = pd.to_numeric(filtered_df["turnTimeMinutes"], errors="coerce")
 filtered_df["beverageSales"] = pd.to_numeric(filtered_df["beverageSales"], errors="coerce")
 filtered_df["netSales"] = pd.to_numeric(filtered_df["netSales"], errors="coerce")
 filtered_df["checkNumber"] = pd.to_numeric(filtered_df["checkNumber"], errors="coerce")
+
+# Drop rows missing critical fields
+filtered_df = filtered_df.dropna(
+    subset=["locationId", "businessDate", "serverName", "turnTimeMinutes", "beverageSales", "netSales", "checkNumber"]
+).copy()
+
+if filtered_df.empty:
+    st.warning("Data was returned from the database, but none of it matched the fields required by the dashboard.")
+    with st.expander("Returned columns"):
+        st.write(list(checks_df.columns))
+    st.stop()
+
 
 def render_kpi_row(df, prefix="Market"):
     kpi_cols = st.columns(3)
@@ -239,22 +259,20 @@ def render_kpi_row(df, prefix="Market"):
     )
     kpi_cols[2].metric("Turn Time Goal", "45 min")
 
+
 st.markdown("### Specific Focus: Table Turns")
 st.caption("Using stored historical data from Supabase.")
-
 st.markdown("---")
 
-# --- Multi-Store Dynamic Resolution ---
+# --- Multi-store resolution ---
 store_names = []
 unique_locs = []
 
 if not filtered_df.empty and "locationId" in filtered_df.columns:
-    unique_locs = filtered_df["locationId"].dropna().unique()
+    unique_locs = filtered_df["locationId"].dropna().astype(int).unique()
     for loc in unique_locs:
         if loc in loc_map:
             store_names.append(f"{loc} - {loc_map[loc]}")
-        elif isinstance(loc, str) and str(loc).isdigit() and int(loc) in loc_map:
-            store_names.append(f"{loc} - {loc_map[int(loc)]}")
         else:
             store_names.append(str(loc))
 
@@ -268,7 +286,7 @@ with tab1:
     for i, loc in enumerate(unique_locs):
         st.markdown("---")
         st.markdown(f"#### 📍 {store_names[i]}")
-        loc_df = filtered_df[filtered_df["locationId"] == loc].copy()
+        loc_df = filtered_df[filtered_df["locationId"].astype(int) == int(loc)].copy()
         if not loc_df.empty:
             render_kpi_row(loc_df, prefix="Store")
             render_table_turns(loc_df, key=f"store_turns_{loc}")
@@ -293,7 +311,7 @@ with tab2:
     for i, loc in enumerate(unique_locs):
         st.markdown("---")
         st.markdown(f"#### 📍 {store_names[i]}")
-        loc_df = filtered_df[filtered_df["locationId"] == loc].copy()
+        loc_df = filtered_df[filtered_df["locationId"].astype(int) == int(loc)].copy()
         if not loc_df.empty:
             render_combined_leaderboard(
                 loc_df,
