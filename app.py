@@ -1,8 +1,11 @@
-import streamlit as st
-import pandas as pd
-import psycopg2
+import io
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+
+import matplotlib.pyplot as plt
+import pandas as pd
+import psycopg2
+import streamlit as st
 
 import api
 
@@ -13,7 +16,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-APP_VERSION = "v1.4.0"
+APP_VERSION = "v1.5.0"
 
 
 @st.dialog("Data Availability")
@@ -25,7 +28,7 @@ def show_realtime_warning():
 
 
 # -----------------------------
-# Helpers
+# DB helpers
 # -----------------------------
 def get_db_connection():
     return psycopg2.connect(
@@ -61,18 +64,22 @@ def get_data_from_db(start_date, end_date, locations=None):
             df = pd.read_sql(query, conn, params=(start_date, end_date))
     finally:
         conn.close()
-
     return df
 
 
-def weighted_bev_pct(df: pd.DataFrame) -> float:
-    if df.empty:
-        return 0.0
-    total_sales = df["sales"].sum()
-    if total_sales <= 0:
-        return 0.0
-    bev_dollars_est = (df["sales"] * (df["beverage_pct"] / 100.0)).sum()
-    return (bev_dollars_est / total_sales) * 100.0
+@st.cache_data(ttl=3600)
+def get_location_map_from_api():
+    raw_locations = api.get_locations()
+    loc_map = {}
+    if isinstance(raw_locations, list):
+        for loc in raw_locations:
+            if not loc:
+                continue
+            l_id = loc.get("Id", loc.get("id"))
+            l_name = loc.get("Name", loc.get("name", "Unknown"))
+            if l_id is not None:
+                loc_map[int(l_id)] = l_name
+    return loc_map
 
 
 def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -97,12 +104,17 @@ def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def format_ppa_status(ppa: float):
-    if ppa >= 21:
-        return "#21c55d", "#13281c", "vs $21.00 Goal"
-    if ppa >= 20:
-        return "#eab308", "#2e270f", "vs $21.00 Goal"
-    return "#ef4444", "#321717", "vs $21.00 Goal"
+# -----------------------------
+# Metric helpers
+# -----------------------------
+def weighted_bev_pct(df: pd.DataFrame) -> float:
+    if df.empty:
+        return 0.0
+    total_sales = df["sales"].sum()
+    if total_sales <= 0:
+        return 0.0
+    bev_dollars = (df["sales"] * (df["beverage_pct"] / 100.0)).sum()
+    return (bev_dollars / total_sales) * 100.0
 
 
 def build_server_summary(df: pd.DataFrame) -> pd.DataFrame:
@@ -113,7 +125,6 @@ def build_server_summary(df: pd.DataFrame) -> pd.DataFrame:
         df.groupby("employee_name", dropna=False)
         .agg(
             turn_time=("turn_time", "mean"),
-            beverage_dollars=("sales", lambda s: 0.0),
             sales=("sales", "sum"),
             check_count=("check_count", "sum"),
         )
@@ -127,7 +138,7 @@ def build_server_summary(df: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
     )
 
-    grouped = grouped.drop(columns=["beverage_dollars"]).merge(bev_source, on="employee_name", how="left")
+    grouped = grouped.merge(bev_source, on="employee_name", how="left")
     grouped["beverage_pct"] = grouped.apply(
         lambda r: (r["beverage_dollars"] / r["sales"] * 100.0) if r["sales"] > 0 else 0.0,
         axis=1,
@@ -137,9 +148,8 @@ def build_server_summary(df: pd.DataFrame) -> pd.DataFrame:
         axis=1,
     )
 
-    return grouped[["employee_name", "turn_time", "beverage_pct", "ppa", "check_count", "sales"]].sort_values(
-        "ppa", ascending=False
-    )
+    grouped = grouped[["employee_name", "turn_time", "beverage_pct", "ppa", "check_count", "sales"]]
+    return grouped.sort_values("ppa", ascending=False).reset_index(drop=True)
 
 
 def build_location_summary(df: pd.DataFrame, loc_map: dict) -> pd.DataFrame:
@@ -187,6 +197,107 @@ def build_location_summary(df: pd.DataFrame, loc_map: dict) -> pd.DataFrame:
     return out.sort_values("PPA", ascending=False).reset_index(drop=True)
 
 
+def format_ppa_status(ppa: float):
+    if ppa >= 21:
+        return "#21c55d", "#13281c"
+    if ppa >= 20:
+        return "#eab308", "#2e270f"
+    return "#ef4444", "#321717"
+
+
+def style_location_summary(df: pd.DataFrame):
+    def color_turn(v):
+        if pd.isna(v):
+            return ""
+        if v <= 40:
+            return "background-color: #16351f; color: #d1fae5;"
+        if v <= 45:
+            return "background-color: #3a3112; color: #fef3c7;"
+        return "background-color: #3b1a1a; color: #fecaca;"
+
+    def color_bev(v):
+        if pd.isna(v):
+            return ""
+        if v >= 19:
+            return "background-color: #16351f; color: #d1fae5;"
+        if v >= 18:
+            return "background-color: #3a3112; color: #fef3c7;"
+        return "background-color: #3b1a1a; color: #fecaca;"
+
+    def color_ppa(v):
+        if pd.isna(v):
+            return ""
+        if v >= 21:
+            return "background-color: #16351f; color: #d1fae5;"
+        if v >= 20:
+            return "background-color: #3a3112; color: #fef3c7;"
+        return "background-color: #3b1a1a; color: #fecaca;"
+
+    return (
+        df.style
+        .format(
+            {
+                "Turn Time": "{:.1f}",
+                "Bev %": "{:.1f}%",
+                "PPA": "${:.2f}",
+                "Checks": "{:.0f}",
+                "Sales": "${:,.2f}",
+            }
+        )
+        .applymap(color_turn, subset=["Turn Time"])
+        .applymap(color_bev, subset=["Bev %"])
+        .applymap(color_ppa, subset=["PPA"])
+    )
+
+
+def style_server_summary(df: pd.DataFrame):
+    def color_turn(v):
+        if pd.isna(v):
+            return ""
+        if v <= 40:
+            return "background-color: #16351f; color: #d1fae5;"
+        if v <= 45:
+            return "background-color: #3a3112; color: #fef3c7;"
+        return "background-color: #3b1a1a; color: #fecaca;"
+
+    def color_bev(v):
+        if pd.isna(v):
+            return ""
+        if v >= 19:
+            return "background-color: #16351f; color: #d1fae5;"
+        if v >= 18:
+            return "background-color: #3a3112; color: #fef3c7;"
+        return "background-color: #3b1a1a; color: #fecaca;"
+
+    def color_ppa(v):
+        if pd.isna(v):
+            return ""
+        if v >= 21:
+            return "background-color: #16351f; color: #d1fae5;"
+        if v >= 20:
+            return "background-color: #3a3112; color: #fef3c7;"
+        return "background-color: #3b1a1a; color: #fecaca;"
+
+    return (
+        df.style
+        .format(
+            {
+                "turn_time": "{:.1f}",
+                "beverage_pct": "{:.1f}%",
+                "ppa": "${:.2f}",
+                "check_count": "{:.0f}",
+                "sales": "${:,.2f}",
+            }
+        )
+        .applymap(color_turn, subset=["turn_time"])
+        .applymap(color_bev, subset=["beverage_pct"])
+        .applymap(color_ppa, subset=["ppa"])
+    )
+
+
+# -----------------------------
+# KPI cards
+# -----------------------------
 def render_kpi_cards(df: pd.DataFrame, header_label: str):
     st.markdown(f"## {header_label}")
 
@@ -214,7 +325,7 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
     top_ppa = server_summary.loc[server_summary["ppa"].idxmax(), "employee_name"] if total_servers else "N/A"
     bottom_ppa = server_summary.loc[server_summary["ppa"].idxmin(), "employee_name"] if total_servers else "N/A"
 
-    ppa_border, ppa_bg, ppa_note = format_ppa_status(ppa)
+    ppa_border, ppa_bg = format_ppa_status(ppa)
 
     cols = st.columns(4)
 
@@ -268,6 +379,61 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
             """,
             unsafe_allow_html=True,
         )
+
+
+# -----------------------------
+# WhatsApp export
+# -----------------------------
+def build_whatsapp_png(title: str, subtitle: str, df: pd.DataFrame) -> bytes:
+    display_df = df.copy()
+    display_df["Turn"] = display_df["turn_time"].map(lambda x: f"{x:.1f}")
+    display_df["Bev %"] = display_df["beverage_pct"].map(lambda x: f"{x:.1f}%")
+    display_df["PPA"] = display_df["ppa"].map(lambda x: f"${x:.2f}")
+    display_df["Checks"] = display_df["check_count"].map(lambda x: f"{x:.0f}")
+    display_df["Sales"] = display_df["sales"].map(lambda x: f"${x:,.0f}")
+
+    display_df = display_df.rename(columns={"employee_name": "Employee"})
+    display_df = display_df[["Employee", "Turn", "Bev %", "PPA", "Checks", "Sales"]].head(18)
+
+    rows = len(display_df)
+    fig_height = max(6, 1.8 + rows * 0.35)
+
+    fig, ax = plt.subplots(figsize=(10, fig_height), dpi=200)
+    fig.patch.set_facecolor("#020817")
+    ax.set_facecolor("#020817")
+    ax.axis("off")
+
+    ax.text(0.01, 1.06, title, fontsize=20, fontweight="bold", color="white", transform=ax.transAxes)
+    ax.text(0.01, 1.01, subtitle, fontsize=10, color="#94a3b8", transform=ax.transAxes)
+
+    table = ax.table(
+        cellText=display_df.values,
+        colLabels=display_df.columns,
+        loc="upper left",
+        cellLoc="left",
+        colLoc="left",
+        bbox=[0, 0, 1, 0.95],
+    )
+
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+
+    for (r, c), cell in table.get_celld().items():
+        cell.set_edgecolor("#1f2937")
+        if r == 0:
+            cell.set_facecolor("#111827")
+            cell.get_text().set_color("white")
+            cell.get_text().set_fontweight("bold")
+        else:
+            cell.set_facecolor("#0f172a")
+            cell.get_text().set_color("white")
+
+    buf = io.BytesIO()
+    plt.tight_layout()
+    plt.savefig(buf, format="png", bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
 
 
 # -----------------------------
@@ -341,21 +507,10 @@ st.sidebar.info(
 
 with st.spinner("Loading Locations..."):
     try:
-        raw_locations = api.get_locations()
-        loc_map = {}
-        if isinstance(raw_locations, list):
-            for loc in raw_locations:
-                if not loc:
-                    continue
-                l_id = loc.get("Id", loc.get("id"))
-                l_name = loc.get("Name", loc.get("name", "Unknown"))
-                if l_id is not None:
-                    loc_map[int(l_id)] = l_name
-
+        loc_map = get_location_map_from_api()
         if not loc_map:
             st.sidebar.error("Could not load locations from Rosnet.")
             st.stop()
-
     except Exception as e:
         st.sidebar.error(f"Could not load locations from Rosnet: {e}")
         st.stop()
@@ -407,17 +562,8 @@ with tab1:
     st.markdown("### Location Breakdown")
 
     summary_df = build_location_summary(df, loc_map)
-
     st.dataframe(
-        summary_df.style.format(
-            {
-                "Turn Time": "{:.1f}",
-                "Bev %": "{:.1f}%",
-                "PPA": "${:.2f}",
-                "Checks": "{:.0f}",
-                "Sales": "${:,.2f}",
-            }
-        ),
+        style_location_summary(summary_df),
         use_container_width=True,
         height=500,
     )
@@ -428,6 +574,21 @@ with tab2:
     else:
         render_kpi_cards(df, header_label="MARKET TOTAL")
 
+        market_server_df = build_server_summary(df)
+
+        market_png = build_whatsapp_png(
+            "MARKET TOTAL",
+            f"{start_date.strftime('%b %d, %Y')} to {end_date.strftime('%b %d, %Y')}",
+            market_server_df,
+        )
+        st.download_button(
+            "Download MARKET TOTAL WhatsApp Image",
+            data=market_png,
+            file_name="market_total_whatsapp.png",
+            mime="image/png",
+            key="market_total_png",
+        )
+
         unique_locs = sorted(df["store_number"].dropna().astype(int).unique())
 
         for loc in unique_locs:
@@ -435,21 +596,30 @@ with tab2:
             if loc_df.empty:
                 continue
 
+            store_name = loc_map.get(int(loc), str(loc))
+
             st.markdown("---")
-            st.markdown(f"### 📍 {loc_map.get(int(loc), str(loc))}")
+            st.markdown(f"### 📍 {store_name}")
+
+            render_kpi_cards(loc_df, header_label="STORE TOTAL")
 
             server_df = build_server_summary(loc_df)
 
+            png_bytes = build_whatsapp_png(
+                store_name,
+                f"{start_date.strftime('%b %d, %Y')} to {end_date.strftime('%b %d, %Y')}",
+                server_df,
+            )
+            st.download_button(
+                f"Download {store_name} WhatsApp Image",
+                data=png_bytes,
+                file_name=f"{store_name.lower().replace(' ', '_')}_whatsapp.png",
+                mime="image/png",
+                key=f"png_{loc}",
+            )
+
             st.dataframe(
-                server_df.style.format(
-                    {
-                        "turn_time": "{:.1f}",
-                        "beverage_pct": "{:.1f}%",
-                        "ppa": "${:.2f}",
-                        "check_count": "{:.0f}",
-                        "sales": "${:,.2f}",
-                    }
-                ),
+                style_server_summary(server_df),
                 use_container_width=True,
                 height=min(500, 45 + len(server_df) * 35),
             )
