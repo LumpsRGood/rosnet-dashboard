@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import psycopg2
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import api
@@ -179,6 +180,27 @@ def _normalize_df(data):
         df.columns = [c[0].lower() + c[1:] for c in df.columns]
     return df
 
+def get_data_from_db(start_date, end_date, locations):
+    conn = psycopg2.connect(
+        host="aws-1-us-west-2.pooler.supabase.com",
+        port=6543,
+        dbname="postgres",
+        user="postgres.aufyngvetzgmrnavmpay",
+        password="7pQj1NeWJcVF0dZ3"
+    )
+
+    query = """
+        SELECT *
+        FROM employee_daily_metrics
+        WHERE store_number = ANY(%s)
+        AND business_date BETWEEN %s AND %s
+    """
+
+    df = pd.read_sql(query, conn, params=(locations, start_date, end_date))
+
+    conn.close()
+    return df
+
 @st.cache_data(ttl=3600)
 def get_cached_bev_cats():
     return api.get_beverage_category_ids()
@@ -204,7 +226,7 @@ col_load = st.empty()
 with col_load:
     with st.spinner("Crunching table checks from Rosnet..."):
         try:
-            checks_df = load_check_data(start_date, end_date, selected_locations)
+            checks_df = get_data_from_db(start_date, end_date, selected_locations)
         except api.RateLimitExceeded as e:
             handle_rate_limit(e)
         except Exception as e:
