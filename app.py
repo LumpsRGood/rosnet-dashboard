@@ -8,8 +8,6 @@ import psycopg2
 import streamlit as st
 from matplotlib.patches import Rectangle
 
-import api
-
 st.set_page_config(
     page_title="Rosnet Insights Dashboard",
     page_icon="🍔",
@@ -97,21 +95,27 @@ def get_sync_freshness():
 
     return df.iloc[0].to_dict()
 
+@st.cache_data(ttl=300)
+def get_location_map_from_db():
+    conn = get_db_connection()
+    try:
+        df = pd.read_sql(
+            """
+            SELECT store_number, store_name
+            FROM sync_progress
+            WHERE store_number IS NOT NULL
+              AND store_name IS NOT NULL
+            ORDER BY store_number
+            """,
+            conn,
+        )
+    finally:
+        conn.close()
 
-@st.cache_data(ttl=3600)
-def get_location_map_from_api():
-    raw_locations = api.get_locations()
-    loc_map = {}
-    if isinstance(raw_locations, list):
-        for loc in raw_locations:
-            if not loc:
-                continue
-            l_id = loc.get("Id", loc.get("id"))
-            l_name = loc.get("Name", loc.get("name", "Unknown"))
-            if l_id is not None:
-                loc_map[int(l_id)] = l_name
-    return loc_map
+    if df.empty:
+        return {}
 
+    return {int(row["store_number"]): row["store_name"] for _, row in df.iterrows()}
 
 def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
@@ -767,7 +771,7 @@ st.sidebar.info(
 
 with st.spinner("Loading Locations..."):
     try:
-        loc_map = get_location_map_from_api()
+        loc_map = get_location_map_from_db()
         if not loc_map:
             st.sidebar.error("Could not load locations from Rosnet.")
             st.stop()
