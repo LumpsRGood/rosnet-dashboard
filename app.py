@@ -182,12 +182,12 @@ def _normalize_df(data):
 
 def get_data_from_db(start_date, end_date, locations):
     conn = psycopg2.connect(
-        host="aws-1-us-west-2.pooler.supabase.com",
-        port=6543,
-        dbname="postgres",
-        user="postgres.aufyngvetzgmrnavmpay",
-        password="7pQj1NeWJcVF0dZ3"
-    )
+        host=st.secrets["database"]["host"],
+        port=st.secrets["database"]["port"],
+        dbname=st.secrets["database"]["dbname"],
+        user=st.secrets["database"]["user"],
+        password=st.secrets["database"]["password"]
+)
 
     query = """
         SELECT *
