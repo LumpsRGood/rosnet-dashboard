@@ -891,31 +891,31 @@ with tab4:
         """
 
     def roadmap_card(title, items, color):
-    rows = ""
+        rows = ""
 
-    for text, status in items:
-        extra = ""
-        if status == "LIVE":
-            extra = f'<div style="color:#22c55e; font-size:12px; margin-top:2px;">Live as of {APP_VERSION}</div>'
+        for text, status in items:
+            extra = ""
+            if status == "LIVE":
+                extra = f'<div style="color:#22c55e; font-size:12px; margin-top:2px;">Live as of {APP_VERSION}</div>'
 
-        rows += f"<li style='margin-bottom:10px;'>{text} {status_tag(status)}{extra}</li>"
+            rows += f"<li style='margin-bottom:10px;'>{text} {status_tag(status)}{extra}</li>"
 
-    return f"""
-    <div style="
-        border:1px solid {color};
-        border-radius:18px;
-        padding:22px;
-        background:rgba(255,255,255,0.02);
-        min-height:230px;
-    ">
-        <div style="color:{color}; font-size:16px; font-weight:700; margin-bottom:12px;">
-            {title}
+        return f"""
+        <div style="
+            border:1px solid {color};
+            border-radius:18px;
+            padding:22px;
+            background:rgba(255,255,255,0.02);
+            min-height:230px;
+        ">
+            <div style="color:{color}; font-size:16px; font-weight:700; margin-bottom:12px;">
+                {title}
+            </div>
+            <ul style="margin-left:18px; line-height:1.7;">
+                {rows}
+            </ul>
         </div>
-        <ul style="margin-left:18px; line-height:1.7;">
-            {rows}
-        </ul>
-    </div>
-    """
+        """
 
     col1, col2 = st.columns(2)
 
