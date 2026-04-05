@@ -220,12 +220,12 @@ def transform_checks(df, store_id, day_str):
         return pd.DataFrame()
 
     # --- 🔥 CALCULATE TURN TIME ---
-    df["openTime"] = pd.to_datetime(df["openTime"], errors="coerce")
-    df["closeTime"] = pd.to_datetime(df["closeTime"], errors="coerce")
+    df["openTime"] = pd.to_datetime(df["openTime"], format="%H:%M:%S", errors="coerce")
+    df["closeTime"] = pd.to_datetime(df["closeTime"], format="%H:%M:%S", errors="coerce")
 
     df["turn_time"] = (df["closeTime"] - df["openTime"]).dt.total_seconds() / 60
+    df.loc[df["turn_time"] < 0, "turn_time"] += 24 * 60
 
-    # Remove bad data
     df = df[df["turn_time"] > 0]
 
     if df.empty:
