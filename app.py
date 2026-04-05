@@ -891,12 +891,12 @@ with tab4:
         """
 
     def roadmap_card(title, items, color):
-    rows = ""
-    for text, status in items:
-        extra = ""
-        if status == "LIVE":
-            extra = f'<div style="color:#22c55e; font-size:12px; margin-top:2px;">Live as of {APP_VERSION}</div>'
-        rows += f"<li style='margin-bottom:10px;'>{text} {status_tag(status)}{extra}</li>"
+        rows = ""
+        for text, status in items:
+            extra = ""
+            if status == "LIVE":
+                extra = f'<div style="color:#22c55e; font-size:12px; margin-top:2px;">Live as of {APP_VERSION}</div>'
+            rows += f"<li style='margin-bottom:10px;'>{text} {status_tag(status)}{extra}</li>"
 
     return f"""
     <div style="
