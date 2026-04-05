@@ -3,7 +3,15 @@ name: Sync Rosnet to Supabase
 on:
   schedule:
     - cron: "10 6 * * *"
-    - cron: "10 11 * * *"
+    - cron: "40 6 * * *"
+    - cron: "10 7 * * *"
+    - cron: "40 7 * * *"
+    - cron: "10 8 * * *"
+    - cron: "40 8 * * *"
+    - cron: "10 9 * * *"
+    - cron: "40 9 * * *"
+    - cron: "10 10 * * *"
+    - cron: "40 10 * * *"
   workflow_dispatch:
 
 env:
@@ -43,5 +51,8 @@ jobs:
           DB_USER: ${{ secrets.DB_USER }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           SYNC_LOOKBACK_DAYS: ${{ secrets.SYNC_LOOKBACK_DAYS }}
+          MAX_STORES_PER_RUN: ${{ secrets.MAX_STORES_PER_RUN }}
+          REQUEST_DELAY_SECONDS: ${{ secrets.REQUEST_DELAY_SECONDS }}
+          MAX_RATE_LIMIT_EVENTS: ${{ secrets.MAX_RATE_LIMIT_EVENTS }}
         run: |
           python sync_rosnet.py
