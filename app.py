@@ -486,10 +486,10 @@ def render_sync_freshness():
 
     if pd.isna(last_attempted):
         last_attempted_text = "Unknown"
-        else:
-            local_tz = ZoneInfo("America/Chicago")
-            last_attempted_ts = pd.to_datetime(last_attempted, utc=True).tz_convert(local_tz)
-            last_attempted_text = last_attempted_ts.strftime("%b %d, %Y %I:%M %p %Z")
+    else:
+        local_tz = ZoneInfo("America/Chicago")
+        last_attempted_ts = pd.to_datetime(last_attempted, utc=True).tz_convert(local_tz)
+        last_attempted_text = last_attempted_ts.strftime("%b %d, %Y %I:%M %p %Z")
     st.markdown(
         f"""
         <div style="
