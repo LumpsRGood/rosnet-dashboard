@@ -26,10 +26,10 @@ sync_lookback_raw = os.getenv("SYNC_LOOKBACK_DAYS")
 SYNC_LOOKBACK_DAYS = int(sync_lookback_raw) if sync_lookback_raw and sync_lookback_raw.strip() else 1
 
 max_stores_raw = os.getenv("MAX_STORES_PER_RUN")
-MAX_STORES_PER_RUN = int(max_stores_raw) if max_stores_raw and max_stores_raw.strip() else 10
+MAX_STORES_PER_RUN = int(max_stores_raw) if max_stores_raw and max_stores_raw.strip() else 8
 
 request_delay_raw = os.getenv("REQUEST_DELAY_SECONDS")
-REQUEST_DELAY_SECONDS = float(request_delay_raw) if request_delay_raw and request_delay_raw.strip() else 2.5
+REQUEST_DELAY_SECONDS = float(request_delay_raw) if request_delay_raw and request_delay_raw.strip() else 3.0
 
 max_rate_limit_events_raw = os.getenv("MAX_RATE_LIMIT_EVENTS")
 MAX_RATE_LIMIT_EVENTS = int(max_rate_limit_events_raw) if max_rate_limit_events_raw and max_rate_limit_events_raw.strip() else 3
@@ -79,14 +79,12 @@ def ensure_tables(conn):
             );
             """
         )
-
         cur.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_employee_daily_metrics_date_store
             ON employee_daily_metrics (business_date, store_number);
             """
         )
-
         conn.commit()
     finally:
         cur.close()
@@ -95,7 +93,6 @@ def ensure_tables(conn):
 def build_location_map():
     raw_locations = api.get_locations()
     loc_map = {}
-
     for loc in raw_locations:
         if not loc:
             continue
@@ -103,7 +100,6 @@ def build_location_map():
         l_name = loc.get("Name", loc.get("name", "Unknown"))
         if l_id is not None:
             loc_map[int(l_id)] = l_name
-
     return loc_map
 
 
@@ -128,13 +124,6 @@ def seed_sync_progress(conn, loc_map):
 
 
 def select_stores_for_run(conn, target_date, max_stores):
-    """
-    Pick stores that either:
-    - have never been synced
-    - or have last_synced_date older than target_date
-
-    Ordered so the stalest stores get picked first.
-    """
     cur = conn.cursor()
     try:
         cur.execute(
@@ -151,8 +140,7 @@ def select_stores_for_run(conn, target_date, max_stores):
             """,
             (target_date, max_stores),
         )
-        rows = cur.fetchall()
-        return rows
+        return cur.fetchall()
     finally:
         cur.close()
 
@@ -201,7 +189,50 @@ def fetch_store_day(store_id, day_str, emp_map, bev_ids):
     return pd.DataFrame(checks)
 
 
+def filter_to_true_dine_in(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df.copy()
+
+    if "orderType" not in df.columns:
+        return pd.DataFrame()
+
+    order_type = df["orderType"].fillna("").astype(str).str.strip().str.lower()
+
+    allowed = {
+        "eat in",
+        "eat-in",
+        "dine in",
+        "dine-in",
+    }
+
+    excluded_contains = [
+        "staff",
+        "olo",
+        "online",
+        "to go",
+        "togo",
+        "to-go",
+        "delivery",
+        "pickup",
+        "carryout",
+        "carry out",
+        "curbside",
+        "3rd party",
+        "third party",
+    ]
+
+    dine_mask = order_type.isin(allowed)
+    for bad in excluded_contains:
+        dine_mask &= ~order_type.str.contains(bad, na=False)
+
+    return df[dine_mask].copy()
+
+
 def transform_checks(df, store_id, day_str):
+    if df.empty:
+        return pd.DataFrame()
+
+    df = filter_to_true_dine_in(df)
     if df.empty:
         return pd.DataFrame()
 
@@ -211,7 +242,6 @@ def transform_checks(df, store_id, day_str):
         print(f"    skipped, missing columns: {sorted(missing)}")
         return pd.DataFrame()
 
-    # Clean + prepare
     df = df.dropna(
         subset=["serverName", "checkNumber", "netSales", "beverageSales", "openTime", "closeTime"]
     ).copy()
@@ -219,19 +249,16 @@ def transform_checks(df, store_id, day_str):
     if df.empty:
         return pd.DataFrame()
 
-    # --- 🔥 CALCULATE TURN TIME ---
     df["openTime"] = pd.to_datetime(df["openTime"], format="%H:%M:%S", errors="coerce")
     df["closeTime"] = pd.to_datetime(df["closeTime"], format="%H:%M:%S", errors="coerce")
 
     df["turn_time"] = (df["closeTime"] - df["openTime"]).dt.total_seconds() / 60
     df.loc[df["turn_time"] < 0, "turn_time"] += 24 * 60
-
-    df = df[df["turn_time"] > 0]
+    df = df[df["turn_time"] > 0].copy()
 
     if df.empty:
         return pd.DataFrame()
 
-    # --- GROUP ---
     grouped = (
         df.groupby("serverName", dropna=False)
         .agg(
@@ -243,20 +270,19 @@ def transform_checks(df, store_id, day_str):
         .reset_index()
     )
 
-    # --- METRICS ---
     grouped["ppa"] = grouped["sales"] / grouped["check_count"]
     grouped["beverage_pct"] = (
         (grouped["beverage_sales"] / grouped["sales"])
-        .fillna(0) * 100
+        .replace([pd.NA, pd.NaT], 0)
+        .fillna(0)
+        * 100
     )
 
-    # Stable employee ID
     grouped["employee_id"] = (
         grouped["serverName"]
         .fillna("")
         .apply(lambda x: abs(hash((int(store_id), day_str, x))) % 2147483647)
     )
-
     grouped["employee_name"] = grouped["serverName"]
 
     return grouped[
@@ -270,6 +296,7 @@ def transform_checks(df, store_id, day_str):
             "sales",
         ]
     ]
+
 
 def upsert_grouped_rows(conn, grouped_df, store_id, business_date):
     cur = conn.cursor()
@@ -317,9 +344,6 @@ def upsert_grouped_rows(conn, grouped_df, store_id, business_date):
         cur.close()
 
 
-# -----------------------------
-# Main
-# -----------------------------
 def main():
     print(f"Sync window: {start_date} to {end_date}")
     print(f"Max stores this run: {MAX_STORES_PER_RUN}")
@@ -396,11 +420,6 @@ def main():
                     continue
 
                 time.sleep(REQUEST_DELAY_SECONDS)
-
-                if df.empty:
-                    print("    no rows")
-                    latest_synced_for_store = day
-                    continue
 
                 grouped = transform_checks(df, store_id, day_str)
                 if grouped.empty:
