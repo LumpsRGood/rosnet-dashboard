@@ -485,11 +485,11 @@ def render_sync_freshness():
             bg_color = "#321717"
 
     if pd.isna(last_attempted):
-        last_attempted_text = "Unknown"
-    else:
-        last_attempted_ts = pd.to_datetime(last_attempted)
-        last_attempted_text = last_attempted_ts.strftime("%b %d, %Y %I:%M %p")
-
+    last_attempted_text = "Unknown"
+        else:
+            local_tz = ZoneInfo("America/Chicago")
+            last_attempted_ts = pd.to_datetime(last_attempted, utc=True).tz_convert(local_tz)
+            last_attempted_text = last_attempted_ts.strftime("%b %d, %Y %I:%M %p %Z")
     st.markdown(
         f"""
         <div style="
@@ -891,26 +891,29 @@ with tab4:
         """
 
     def roadmap_card(title, items, color):
-        rows = ""
-        for text, status in items:
-            rows += f"<li>{text} {status_tag(status)}</li>"
+    rows = ""
+    for text, status in items:
+        extra = ""
+        if status == "LIVE":
+            extra = f'<div style="color:#22c55e; font-size:12px; margin-top:2px;">Live as of {APP_VERSION}</div>'
+        rows += f"<li style='margin-bottom:10px;'>{text} {status_tag(status)}{extra}</li>"
 
-        return f"""
-        <div style="
-            border:1px solid {color};
-            border-radius:18px;
-            padding:22px;
-            background:rgba(255,255,255,0.02);
-            min-height:230px;
-        ">
-            <div style="color:{color}; font-size:16px; font-weight:700; margin-bottom:12px;">
-                {title}
-            </div>
-            <ul style="margin-left:18px; line-height:1.7;">
-                {rows}
-            </ul>
+    return f"""
+    <div style="
+        border:1px solid {color};
+        border-radius:18px;
+        padding:22px;
+        background:rgba(255,255,255,0.02);
+        min-height:230px;
+    ">
+        <div style="color:{color}; font-size:16px; font-weight:700; margin-bottom:12px;">
+            {title}
         </div>
-        """
+        <ul style="margin-left:18px; line-height:1.7;">
+            {rows}
+        </ul>
+    </div>
+    """
 
     col1, col2 = st.columns(2)
 
@@ -968,7 +971,7 @@ with tab4:
             roadmap_card(
                 "⚙️ System & Backend",
                 [
-                    (f"Sync Freshness Indicator (v{APP_VERSION})", "LIVE"),
+                    ("Sync Freshness Indicator", "LIVE"),
                     ("Store Sync Coverage", "PLANNED"),
                     ("Admin Diagnostics View", "PLANNED"),
                     ("Data Quality Safeguards", "PLANNED"),
