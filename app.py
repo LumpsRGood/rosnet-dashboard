@@ -17,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-APP_VERSION = "v1.6.1"
+APP_VERSION = "v1.7.0"
 
 
 @st.dialog("Data Availability")
@@ -66,6 +66,36 @@ def get_data_from_db(start_date, end_date, locations=None):
     finally:
         conn.close()
     return df
+
+
+@st.cache_data(ttl=120)
+def get_sync_freshness():
+    conn = get_db_connection()
+    try:
+        query = """
+            SELECT
+                MAX(last_synced_date) AS latest_business_date,
+                MAX(last_attempted_at) AS last_attempted_at,
+                COUNT(*) AS total_stores,
+                COUNT(*) FILTER (
+                    WHERE last_synced_date = (SELECT MAX(last_synced_date) FROM sync_progress)
+                ) AS synced_store_count
+            FROM sync_progress
+        """
+        df = pd.read_sql(query, conn)
+    except Exception:
+        conn.close()
+        return None
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    if df.empty:
+        return None
+
+    return df.iloc[0].to_dict()
 
 
 @st.cache_data(ttl=3600)
@@ -414,6 +444,90 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
         )
 
 
+def render_sync_freshness():
+    freshness = get_sync_freshness()
+    if not freshness:
+        return
+
+    try:
+        tz = ZoneInfo("America/Chicago")
+        today_local = datetime.now(tz).date()
+    except Exception:
+        today_local = datetime.now().date()
+
+    yesterday_local = today_local - timedelta(days=1)
+
+    latest_date = freshness.get("latest_business_date")
+    last_attempted = freshness.get("last_attempted_at")
+    total_stores = int(freshness.get("total_stores") or 0)
+    synced_store_count = int(freshness.get("synced_store_count") or 0)
+
+    if pd.isna(latest_date):
+        status_label = "NO DATA"
+        status_color = "#ef4444"
+        bg_color = "#321717"
+        latest_date_text = "None"
+    else:
+        latest_date = pd.to_datetime(latest_date).date()
+        latest_date_text = latest_date.strftime("%b %d, %Y")
+
+        if latest_date == yesterday_local and synced_store_count == total_stores:
+            status_label = "FRESH"
+            status_color = "#22c55e"
+            bg_color = "#13281c"
+        elif latest_date == yesterday_local:
+            status_label = "PARTIAL"
+            status_color = "#eab308"
+            bg_color = "#2e270f"
+        else:
+            status_label = "STALE"
+            status_color = "#ef4444"
+            bg_color = "#321717"
+
+    if pd.isna(last_attempted):
+        last_attempted_text = "Unknown"
+    else:
+        last_attempted_ts = pd.to_datetime(last_attempted)
+        last_attempted_text = last_attempted_ts.strftime("%b %d, %Y %I:%M %p")
+
+    st.markdown(
+        f"""
+        <div style="
+            border:1px solid {status_color};
+            background:{bg_color};
+            border-radius:16px;
+            padding:16px 18px;
+            margin:10px 0 18px 0;
+        ">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap;">
+                <div>
+                    <div style="color:{status_color}; font-size:13px; font-weight:700; letter-spacing:1px;">
+                        DATA FRESHNESS
+                    </div>
+                    <div style="color:white; font-size:15px; margin-top:6px;">
+                        Last sync completed: <b>{last_attempted_text}</b><br>
+                        Latest business date loaded: <b>{latest_date_text}</b><br>
+                        Stores synced for latest date: <b>{synced_store_count} of {total_stores}</b>
+                    </div>
+                </div>
+                <div style="
+                    background:{status_color};
+                    color:white;
+                    font-weight:700;
+                    font-size:12px;
+                    padding:8px 14px;
+                    border-radius:999px;
+                    white-space:nowrap;
+                ">
+                    {status_label}
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 # -----------------------------
 # WhatsApp image export
 # -----------------------------
@@ -655,6 +769,8 @@ st.warning(
     "🚧 **Under Development:** This dashboard is currently in active testing. Errors may occasionally occur. Please contact **Chad** with any issues, feedback, or UI suggestions."
 )
 
+render_sync_freshness()
+
 active_locations = selected_locations if selected_locations else None
 header_label = "MARKET TOTAL" if selected_locations else "COMPANY TOTAL"
 
@@ -690,6 +806,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "🧾 Dataset",
     "🚀 Coming Attractions"
 ])
+
 with tab1:
     render_kpi_cards(df, header_label=header_label)
 
@@ -747,11 +864,6 @@ with tab2:
 with tab3:
     st.markdown("### Combined Stored Dataset")
     st.dataframe(df, use_container_width=True, height=600)
-
-st.markdown(
-    f"<br><hr><center><small>Powered by Rosnet Sync + Supabase | {APP_VERSION}</small></center>",
-    unsafe_allow_html=True,
-)
 
 with tab4:
     st.markdown("## 🚀 Coming Attractions")
@@ -856,7 +968,7 @@ with tab4:
             roadmap_card(
                 "⚙️ System & Backend",
                 [
-                    ("Sync Freshness Indicator", "IN PROGRESS"),
+                    (f"Sync Freshness Indicator (v{APP_VERSION})", "LIVE"),
                     ("Store Sync Coverage", "PLANNED"),
                     ("Admin Diagnostics View", "PLANNED"),
                     ("Data Quality Safeguards", "PLANNED"),
@@ -867,8 +979,12 @@ with tab4:
         )
 
     st.markdown("---")
-
     st.markdown(
         "<center><i>This dashboard is evolving fast. Every update is built to drive One More Visit.</i></center>",
         unsafe_allow_html=True,
     )
+
+st.markdown(
+    f"<br><hr><center><small>Powered by Rosnet Sync + Supabase | {APP_VERSION}</small></center>",
+    unsafe_allow_html=True,
+)
