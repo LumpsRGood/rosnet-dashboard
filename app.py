@@ -411,7 +411,7 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
         st.markdown(
             f"""
             <div style="border:1px solid #8a6d1f; background:#2f2918; {card_style_base}">
-                <div style="color:#f0b90b; {label_style}">AVG TURN TIME</div>
+                <div style="color:#f0b90b; {label_style}">AVG TURN TIME (DINE IN ONLY)</div>
                 <div style="{value_style}">{avg_turn:.2f}</div>
                 <div style="{detail_style}">
                     <div>Best: <b>{best_turn}</b></div>
@@ -426,7 +426,7 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
         st.markdown(
             f"""
             <div style="border:1px solid #8d2b2b; background:#35191d; {card_style_base}">
-                <div style="color:#ff4b4b; {label_style}">AVG DINE IN BEV %</div>
+                <div style="color:#ff4b4b; {label_style}">AVG BEV % (DINE IN ONLY)</div>
                 <div style="{value_style}">{avg_bev:.2f}%</div>
                 <div style="{detail_style}">
                     <div>Top: <b>{top_bev}</b></div>
@@ -441,7 +441,7 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
         st.markdown(
             f"""
             <div style="border:1px solid {ppa_border}; background:{ppa_bg}; {card_style_base}">
-                <div style="color:{ppa_border}; {label_style}">PPA</div>
+                <div style="color:{ppa_border}; {label_style}">PPA (ALL SEGMENTS)</div>
                 <div style="{value_style}">${ppa:.2f}</div>
                 <div style="{detail_style}">
                     <div>Top: <b>{top_ppa}</b></div>
@@ -456,7 +456,7 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
         st.markdown(
             f"""
             <div style="border:1px solid #7c3aed; background:#24163d; {card_style_base}">
-                <div style="color:#a855f7; {label_style}">ALL-GREEN</div>
+                <div style="color:#a855f7; {label_style}">ALL-GREEN (DINE IN ONLY)</div>
                 <div style="{value_style}">{all_green_count} of {total_servers}</div>
                 <div style="{detail_style}">
                     <div>Turn ≤40m & Bev ≥19%</div>
