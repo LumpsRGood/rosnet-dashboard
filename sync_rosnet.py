@@ -236,16 +236,37 @@ def transform_checks(df, store_id, day_str):
     if df.empty:
         return pd.DataFrame()
 
-    required = {"serverName", "checkNumber", "netSales", "beverageSales", "openTime", "closeTime"}
+    required = {
+        "serverName",
+        "checkNumber",
+        "netSales",
+        "beverageSales",
+        "openTime",
+        "closeTime",
+        "guestCount",
+    }
     missing = required - set(df.columns)
     if missing:
         print(f"    skipped, missing columns: {sorted(missing)}")
         return pd.DataFrame()
 
     df = df.dropna(
-        subset=["serverName", "checkNumber", "netSales", "beverageSales", "openTime", "closeTime"]
+        subset=[
+            "serverName",
+            "checkNumber",
+            "netSales",
+            "beverageSales",
+            "openTime",
+            "closeTime",
+            "guestCount",
+        ]
     ).copy()
 
+    if df.empty:
+        return pd.DataFrame()
+
+    df["guestCount"] = pd.to_numeric(df["guestCount"], errors="coerce").fillna(0)
+    df = df[df["guestCount"] > 0].copy()
     if df.empty:
         return pd.DataFrame()
 
@@ -266,11 +287,20 @@ def transform_checks(df, store_id, day_str):
             beverage_sales=("beverageSales", "sum"),
             turn_time=("turn_time", "mean"),
             check_count=("checkNumber", "count"),
+            guest_count=("guestCount", "sum"),
         )
         .reset_index()
     )
 
-    grouped["ppa"] = grouped["sales"] / grouped["check_count"]
+    grouped = grouped[grouped["guest_count"] > 0].copy()
+    if grouped.empty:
+        return pd.DataFrame()
+
+    grouped["ppa"] = grouped.apply(
+        lambda r: (r["sales"] / r["guest_count"]) if r["guest_count"] > 0 else 0.0,
+        axis=1,
+    )
+
     grouped["beverage_pct"] = (
         (grouped["beverage_sales"] / grouped["sales"])
         .replace([pd.NA, pd.NaT], 0)
@@ -293,6 +323,7 @@ def transform_checks(df, store_id, day_str):
             "beverage_pct",
             "turn_time",
             "check_count",
+            "guest_count",
             "sales",
         ]
     ]
@@ -313,10 +344,11 @@ def upsert_grouped_rows(conn, grouped_df, store_id, business_date):
                     beverage_pct,
                     turn_time,
                     check_count,
+                    guest_count,
                     sales,
                     updated_at
                 )
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,now())
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())
                 ON CONFLICT (store_number, business_date, employee_id)
                 DO UPDATE SET
                     employee_name = EXCLUDED.employee_name,
@@ -324,6 +356,7 @@ def upsert_grouped_rows(conn, grouped_df, store_id, business_date):
                     beverage_pct = EXCLUDED.beverage_pct,
                     turn_time = EXCLUDED.turn_time,
                     check_count = EXCLUDED.check_count,
+                    guest_count = EXCLUDED.guest_count,
                     sales = EXCLUDED.sales,
                     updated_at = now();
                 """,
@@ -336,6 +369,7 @@ def upsert_grouped_rows(conn, grouped_df, store_id, business_date):
                     float(row["beverage_pct"]),
                     float(row["turn_time"]),
                     float(row["check_count"]),
+                    float(row["guest_count"]),
                     float(row["sales"]),
                 ),
             )
