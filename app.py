@@ -16,7 +16,7 @@ st.set_page_config(
 
 style_metric_cards()
 
-APP_VERSION = "v1.2.2"
+APP_VERSION = "v1.3.0"
 
 
 @st.dialog("Data Availability")
@@ -27,7 +27,169 @@ def show_realtime_warning():
     )
 
 
-# --- Sidebar Filters ---
+# -----------------------------
+# Helpers
+# -----------------------------
+def get_db_connection():
+    return psycopg2.connect(
+        host=st.secrets["database"]["host"],
+        port=st.secrets["database"]["port"],
+        dbname=st.secrets["database"]["dbname"],
+        user=st.secrets["database"]["user"],
+        password=st.secrets["database"]["password"],
+    )
+
+
+@st.cache_data(ttl=300)
+def get_data_from_db(start_date, end_date, locations=None):
+    conn = get_db_connection()
+    try:
+        if locations:
+            locations = [int(x) for x in locations]
+            query = """
+                SELECT *
+                FROM employee_daily_metrics
+                WHERE store_number = ANY(%s::bigint[])
+                  AND business_date BETWEEN %s AND %s
+                ORDER BY business_date, store_number, employee_name
+            """
+            df = pd.read_sql(query, conn, params=(locations, start_date, end_date))
+        else:
+            query = """
+                SELECT *
+                FROM employee_daily_metrics
+                WHERE business_date BETWEEN %s AND %s
+                ORDER BY business_date, store_number, employee_name
+            """
+            df = pd.read_sql(query, conn, params=(start_date, end_date))
+    finally:
+        conn.close()
+
+    return df
+
+
+def prepare_display_df(df):
+    if df.empty:
+        return df.copy()
+
+    out = df.rename(
+        columns={
+            "employee_name": "serverName",
+            "sales": "netSales",
+            "beverage_pct": "beverageSales",
+            "turn_time": "turnTimeMinutes",
+            "check_count": "checkNumber",
+            "store_number": "locationId",
+            "business_date": "businessDate",
+        }
+    ).copy()
+
+    out["locationId"] = pd.to_numeric(out["locationId"], errors="coerce").astype("Int64")
+    out["businessDate"] = pd.to_datetime(out["businessDate"], errors="coerce").dt.date
+    out["turnTimeMinutes"] = pd.to_numeric(out["turnTimeMinutes"], errors="coerce")
+    out["beverageSales"] = pd.to_numeric(out["beverageSales"], errors="coerce")
+    out["netSales"] = pd.to_numeric(out["netSales"], errors="coerce")
+    out["checkNumber"] = pd.to_numeric(out["checkNumber"], errors="coerce")
+
+    out = out.dropna(
+        subset=["locationId", "businessDate", "serverName", "turnTimeMinutes", "beverageSales", "netSales", "checkNumber"]
+    ).copy()
+
+    return out
+
+
+def ppa_status(ppa_value: float) -> str:
+    if ppa_value >= 21:
+        return "green"
+    if ppa_value >= 20:
+        return "yellow"
+    return "red"
+
+
+def render_kpi_cards(df, title_label="COMPANY TOTAL", include_ppa=True):
+    st.markdown(f"### {title_label}")
+
+    avg_turn = df["turnTimeMinutes"].mean() if not df.empty else 0.0
+    avg_bev = df["beverageSales"].mean() if not df.empty else 0.0
+
+    total_sales = df["netSales"].sum() if not df.empty else 0.0
+    total_checks = df["checkNumber"].sum() if not df.empty else 0.0
+    ppa = (total_sales / total_checks) if total_checks > 0 else 0.0
+
+    turn_delta = round(avg_turn - 45, 1)
+    bev_delta = round(avg_bev - 19, 1)
+
+    if include_ppa:
+        cols = st.columns(4)
+    else:
+        cols = st.columns(3)
+
+    cols[0].metric(
+        "Avg Turn Time",
+        f"{avg_turn:.1f} min",
+        f"{turn_delta:+.1f} min vs 45m Goal",
+        delta_color="inverse",
+    )
+
+    cols[1].metric(
+        "Dine In Bev %",
+        f"{avg_bev:.1f}%",
+        f"{bev_delta:+.1f}% vs 19% Goal",
+    )
+
+    cols[2].metric("Turn Time Goal", "45 min")
+
+    if include_ppa:
+        ppa_color = ppa_status(ppa)
+        if ppa_color == "green":
+            ppa_label = "🟢"
+        elif ppa_color == "yellow":
+            ppa_label = "🟡"
+        else:
+            ppa_label = "🔴"
+
+        cols[3].metric(
+            "PPA",
+            f"${ppa:.2f}",
+            f"{ppa_label} vs $21.00 Goal",
+        )
+
+
+def build_location_summary(df, loc_map):
+    if df.empty:
+        return pd.DataFrame()
+
+    summary = (
+        df.groupby("locationId", dropna=False)
+        .agg(
+            turnTimeMinutes=("turnTimeMinutes", "mean"),
+            beverageSales=("beverageSales", "mean"),
+            netSales=("netSales", "sum"),
+            checkNumber=("checkNumber", "sum"),
+        )
+        .reset_index()
+    )
+
+    summary["PPA"] = summary.apply(
+        lambda r: (r["netSales"] / r["checkNumber"]) if r["checkNumber"] > 0 else 0.0,
+        axis=1
+    )
+    summary["Location"] = summary["locationId"].apply(lambda x: f"{int(x)} - {loc_map.get(int(x), 'Unknown')}")
+    summary = summary.rename(
+        columns={
+            "turnTimeMinutes": "Turn Time",
+            "beverageSales": "Bev %",
+            "netSales": "Sales",
+            "checkNumber": "Checks",
+        }
+    )
+
+    return summary[["Location", "Turn Time", "Bev %", "PPA", "Checks", "Sales"]].sort_values("PPA", ascending=False)
+
+
+# -----------------------------
+# Sidebar
+# -----------------------------
 sidebar_col1, sidebar_col2, sidebar_col3 = st.sidebar.columns([1, 1.5, 1])
 with sidebar_col2:
     st.image("logo.png", use_container_width=True)
@@ -42,8 +204,6 @@ st.sidebar.markdown(
 )
 st.sidebar.header("Filter Selections Below")
 
-
-# --- Date logic ---
 try:
     tz = ZoneInfo("America/New_York")
     today = datetime.now(tz).date()
@@ -54,37 +214,24 @@ yesterday = today - timedelta(days=1)
 
 date_method = st.sidebar.radio(
     "Choose Your Timeframe",
-    ["Quick Select", "Custom Range"],
+    ["Yesterday", "WTD", "MTD", "Custom"],
     horizontal=True,
 )
 
-if date_method == "Quick Select":
-    quick_choice = st.sidebar.selectbox(
-        "Range",
-        ["Yesterday", "Week to Date", "Last Week", "Last Month"]
-    )
+if date_method == "Yesterday":
+    start_date = end_date = yesterday
 
-    if quick_choice == "Yesterday":
-        start_date = end_date = yesterday
+elif date_method == "WTD":
+    start_date = today - timedelta(days=today.weekday())
+    end_date = yesterday
+    if start_date > end_date:
+        start_date = end_date
 
-    elif quick_choice == "Week to Date":
-        start_date = today - timedelta(days=today.weekday())
-        end_date = yesterday
-        if start_date > end_date:
-            start_date = end_date
-
-    elif quick_choice == "Last Week":
-        start_date = yesterday - timedelta(days=yesterday.weekday() + 7)
-        end_date = start_date + timedelta(days=6)
-
-    elif quick_choice == "Last Month":
-        first_day_this_month = today.replace(day=1)
-        end_date = first_day_this_month - timedelta(days=1)
-        start_date = end_date.replace(day=1)
-
-    st.sidebar.info(
-        f"Selected: **{start_date.strftime('%b %d, %Y')}** to **{end_date.strftime('%b %d, %Y')}**"
-    )
+elif date_method == "MTD":
+    start_date = today.replace(day=1)
+    end_date = yesterday
+    if start_date > end_date:
+        start_date = end_date
 
 else:
     date_range = st.sidebar.date_input(
@@ -105,8 +252,11 @@ else:
         st.error("Real-time data is unavailable. Please adjust the Custom Date Range in the sidebar.")
         st.stop()
 
+st.sidebar.info(
+    f"Selected: **{start_date.strftime('%b %d, %Y')}** to **{end_date.strftime('%b %d, %Y')}**"
+)
 
-# --- Dynamic locations from Rosnet only ---
+# Dynamic locations only
 with st.spinner("Loading Locations..."):
     try:
         raw_locations = api.get_locations()
@@ -135,192 +285,88 @@ selected_locations = st.sidebar.multiselect(
     default=[],
 )
 
+# -----------------------------
+# Main Data Load
+# -----------------------------
 st.title("*Almost* Live Rosnet Turn and Beverage Data 📈")
 st.warning(
     "🚧 **Under Development:** This dashboard is currently in active testing. Errors may occasionally occur. Please contact **Chad** with any issues, feedback, or UI suggestions."
 )
 
-if len(selected_locations) == 0:
-    st.info("👋 **Welcome to Rosnet Insights!**\n\nPlease select one or more locations from the sidebar to begin your analysis.")
-    st.stop()
-
-
-# --- Database helpers ---
-def get_db_connection():
-    return psycopg2.connect(
-        host=st.secrets["database"]["host"],
-        port=st.secrets["database"]["port"],
-        dbname=st.secrets["database"]["dbname"],
-        user=st.secrets["database"]["user"],
-        password=st.secrets["database"]["password"],
-    )
-
-
-@st.cache_data(ttl=300)
-def get_data_from_db(start_date, end_date, locations):
-    conn = get_db_connection()
-    locations = [int(x) for x in locations]
-
-    query = """
-        SELECT *
-        FROM employee_daily_metrics
-        WHERE store_number = ANY(%s::bigint[])
-          AND business_date BETWEEN %s AND %s
-        ORDER BY business_date, store_number, employee_name
-    """
-
-    try:
-        df = pd.read_sql(query, conn, params=(locations, start_date, end_date))
-    finally:
-        conn.close()
-
-    return df
-
+# No selection = company total
+active_locations = selected_locations if selected_locations else None
+header_label = "MARKET TOTAL" if selected_locations else "COMPANY TOTAL"
 
 with st.spinner("Loading stored Rosnet data..."):
     try:
-        checks_df = get_data_from_db(start_date, end_date, selected_locations)
+        raw_df = get_data_from_db(start_date, end_date, active_locations)
     except Exception as e:
         st.error(f"Error fetching data from database: {e}")
         st.stop()
 
-if checks_df.empty:
+if raw_df.empty:
     st.warning(
         f"No data found for {start_date.strftime('%b %d, %Y')} to {end_date.strftime('%b %d, %Y')} "
-        f"for the selected location(s). Make sure those dates and locations have been synced into Supabase."
+        f"for the current selection."
     )
-    with st.expander("Debug details"):
-        st.write("Selected locations:", selected_locations)
-        st.write("Available location labels:", {k: loc_map[k] for k in selected_locations if k in loc_map})
-        st.write("Date range:", start_date, "to", end_date)
     st.stop()
 
-
-# --- Translate DB schema to component expectations ---
-filtered_df = checks_df.rename(
-    columns={
-        "employee_name": "serverName",
-        "sales": "netSales",
-        "beverage_pct": "beverageSales",
-        "turn_time": "turnTimeMinutes",
-        "check_count": "checkNumber",
-        "store_number": "locationId",
-        "business_date": "businessDate",
-    }
-).copy()
-
-# Normalize types
-filtered_df["locationId"] = pd.to_numeric(filtered_df["locationId"], errors="coerce").astype("Int64")
-filtered_df["businessDate"] = pd.to_datetime(filtered_df["businessDate"], errors="coerce").dt.date
-filtered_df["turnTimeMinutes"] = pd.to_numeric(filtered_df["turnTimeMinutes"], errors="coerce")
-filtered_df["beverageSales"] = pd.to_numeric(filtered_df["beverageSales"], errors="coerce")
-filtered_df["netSales"] = pd.to_numeric(filtered_df["netSales"], errors="coerce")
-filtered_df["checkNumber"] = pd.to_numeric(filtered_df["checkNumber"], errors="coerce")
-
-# Drop rows missing critical fields
-filtered_df = filtered_df.dropna(
-    subset=["locationId", "businessDate", "serverName", "turnTimeMinutes", "beverageSales", "netSales", "checkNumber"]
-).copy()
+filtered_df = prepare_display_df(raw_df)
 
 if filtered_df.empty:
-    st.warning("Data was returned from the database, but none of it matched the fields required by the dashboard.")
-    with st.expander("Returned columns"):
-        st.write(list(checks_df.columns))
+    st.warning("Data was returned, but it did not match the required dashboard fields.")
     st.stop()
 
-
-def render_kpi_row(df, prefix="Market"):
-    kpi_cols = st.columns(3)
-
-    if not df.empty and "turnTimeMinutes" in df.columns:
-        avg_turn_time = df["turnTimeMinutes"].mean()
-        delta_goal = round(avg_turn_time - 45, 1)
-    else:
-        avg_turn_time = 0.0
-        delta_goal = 0.0
-
-    if not df.empty and "beverageSales" in df.columns:
-        bev_pct = df["beverageSales"].mean()
-        bev_delta = round(bev_pct - 19, 1)
-    else:
-        bev_pct = 0.0
-        bev_delta = 0.0
-
-    kpi_cols[0].metric(
-        f"{prefix} Avg Turn Time",
-        f"{avg_turn_time:.1f} min",
-        f"{delta_goal:+.1f} min vs 45m Goal",
-        delta_color="inverse",
-    )
-    kpi_cols[1].metric(
-        f"{prefix} Dine In Bev %",
-        f"{bev_pct:.1f}%",
-        f"{bev_delta:+.1f}% vs 19% Goal",
-    )
-    kpi_cols[2].metric("Turn Time Goal", "45 min")
-
-
-st.markdown("### Specific Focus: Table Turns")
-st.caption("Using stored historical data from Supabase.")
-st.markdown("---")
-
-# --- Multi-store resolution ---
-store_names = []
-unique_locs = []
-
-if not filtered_df.empty and "locationId" in filtered_df.columns:
-    unique_locs = filtered_df["locationId"].dropna().astype(int).unique()
-    for loc in unique_locs:
-        if loc in loc_map:
-            store_names.append(f"{loc} - {loc_map[loc]}")
-        else:
-            store_names.append(str(loc))
-
-tab1, tab2, tab3 = st.tabs(["⏱️ Daily Turn Times", "👨‍🍳 Server Performance", "Raw Dataset Summary"])
+# -----------------------------
+# Tabs
+# -----------------------------
+tab1, tab2, tab3 = st.tabs(["📊 Overview", "👨‍🍳 Server Performance", "Raw Dataset Summary"])
 
 with tab1:
-    st.markdown("### 🏢 Market Total")
-    render_kpi_row(filtered_df, prefix="Market")
-    render_table_turns(filtered_df, key="market_total_turns")
+    render_kpi_cards(filtered_df, title_label=header_label, include_ppa=True)
 
-    for i, loc in enumerate(unique_locs):
-        st.markdown("---")
-        st.markdown(f"#### 📍 {store_names[i]}")
-        loc_df = filtered_df[filtered_df["locationId"].astype(int) == int(loc)].copy()
-        if not loc_df.empty:
-            render_kpi_row(loc_df, prefix="Store")
-            render_table_turns(loc_df, key=f"store_turns_{loc}")
-        else:
-            st.info("No data available for this timeline.")
+    st.markdown("---")
+    st.markdown("### Location Breakdown")
+
+    summary_df = build_location_summary(filtered_df, loc_map)
+    st.dataframe(summary_df, use_container_width=True, height=500)
 
 with tab2:
-    if start_date == end_date:
-        _date_str = start_date.strftime("%b %d, %Y")
+    if not selected_locations:
+        st.info("Select one or more locations from the main page to view server performance.")
     else:
-        _date_str = f"{start_date.strftime('%b %d')} – {end_date.strftime('%b %d, %Y')}"
+        render_kpi_cards(filtered_df, title_label="MARKET TOTAL", include_ppa=True)
 
-    st.markdown("### 🏢 Market Total Leaderboard")
-    _market_title = "Market Total" if len(unique_locs) > 1 else (store_names[0] if store_names else "Market Total")
-    render_combined_leaderboard(
-        filtered_df,
-        key="market_total_leaderboard",
-        title=_market_title,
-        date_range_str=_date_str,
-    )
+        if start_date == end_date:
+            _date_str = start_date.strftime("%b %d, %Y")
+        else:
+            _date_str = f"{start_date.strftime('%b %d')} – {end_date.strftime('%b %d, %Y')}"
 
-    for i, loc in enumerate(unique_locs):
         st.markdown("---")
-        st.markdown(f"#### 📍 {store_names[i]}")
-        loc_df = filtered_df[filtered_df["locationId"].astype(int) == int(loc)].copy()
-        if not loc_df.empty:
+        st.markdown("### MARKET TOTAL")
+        render_combined_leaderboard(
+            filtered_df,
+            key="market_total_leaderboard",
+            title="MARKET TOTAL",
+            date_range_str=_date_str,
+        )
+
+        unique_locs = filtered_df["locationId"].dropna().astype(int).unique()
+
+        for loc in unique_locs:
+            loc_df = filtered_df[filtered_df["locationId"].astype(int) == int(loc)].copy()
+            if loc_df.empty:
+                continue
+
+            st.markdown("---")
+            st.markdown(f"#### 📍 {loc_map.get(int(loc), str(loc))}")
+            render_kpi_cards(loc_df, title_label="MARKET TOTAL", include_ppa=True)
             render_combined_leaderboard(
                 loc_df,
                 key=f"store_leaderboard_{loc}",
-                title=store_names[i],
+                title=loc_map.get(int(loc), str(loc)),
                 date_range_str=_date_str,
             )
-        else:
-            st.info("No server data available for this timeline.")
 
 with tab3:
     st.markdown("### Combined Stored Dataset")
