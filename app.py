@@ -88,6 +88,7 @@ df = df.rename(columns={
     "turn_time": "turnTimeMinutes",
     "check_count": "checkNumber",
     "store_number": "locationId"
+    "business_date": "businessDate"
 })
 
 # Remove old filtering (DB is already processed)
