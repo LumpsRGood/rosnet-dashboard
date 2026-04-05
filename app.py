@@ -87,7 +87,7 @@ df = df.rename(columns={
     "beverage_pct": "beverageSales",
     "turn_time": "turnTimeMinutes",
     "check_count": "checkNumber",
-    "store_number": "locationId"
+    "store_number": "locationId",
     "business_date": "businessDate"
 })
 
