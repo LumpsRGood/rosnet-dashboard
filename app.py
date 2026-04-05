@@ -17,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-APP_VERSION = "v1.7.0"
+APP_VERSION = "v1.8.0"
 
 
 @st.dialog("Data Availability")
@@ -119,7 +119,15 @@ def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
 
     out = df.copy()
 
-    numeric_cols = ["store_number", "ppa", "beverage_pct", "turn_time", "check_count", "sales"]
+    numeric_cols = [
+        "store_number",
+        "ppa",
+        "beverage_pct",
+        "turn_time",
+        "check_count",
+        "guest_count",
+        "sales",
+    ]
     for col in numeric_cols:
         if col in out.columns:
             out[col] = pd.to_numeric(out[col], errors="coerce")
@@ -128,7 +136,17 @@ def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
         out["business_date"] = pd.to_datetime(out["business_date"], errors="coerce").dt.date
 
     out = out.dropna(
-        subset=["store_number", "business_date", "employee_name", "ppa", "beverage_pct", "turn_time", "check_count", "sales"]
+        subset=[
+            "store_number",
+            "business_date",
+            "employee_name",
+            "ppa",
+            "beverage_pct",
+            "turn_time",
+            "check_count",
+            "guest_count",
+            "sales",
+        ]
     ).copy()
 
     out["store_number"] = out["store_number"].astype(int)
@@ -158,6 +176,7 @@ def build_server_summary(df: pd.DataFrame) -> pd.DataFrame:
             turn_time=("turn_time", "mean"),
             sales=("sales", "sum"),
             check_count=("check_count", "sum"),
+            guest_count=("guest_count", "sum"),
         )
         .reset_index()
     )
@@ -175,7 +194,7 @@ def build_server_summary(df: pd.DataFrame) -> pd.DataFrame:
         axis=1,
     )
     grouped["ppa"] = grouped.apply(
-        lambda r: (r["sales"] / r["check_count"]) if r["check_count"] > 0 else 0.0,
+        lambda r: (r["sales"] / r["guest_count"]) if r["guest_count"] > 0 else 0.0,
         axis=1,
     )
 
@@ -193,6 +212,7 @@ def build_location_summary(df: pd.DataFrame, loc_map: dict) -> pd.DataFrame:
             turn_time=("turn_time", "mean"),
             sales=("sales", "sum"),
             check_count=("check_count", "sum"),
+            guest_count=("guest_count", "sum"),
         )
         .reset_index()
     )
@@ -210,7 +230,7 @@ def build_location_summary(df: pd.DataFrame, loc_map: dict) -> pd.DataFrame:
         axis=1,
     )
     grouped["ppa"] = grouped.apply(
-        lambda r: (r["sales"] / r["check_count"]) if r["check_count"] > 0 else 0.0,
+        lambda r: (r["sales"] / r["guest_count"]) if r["guest_count"] > 0 else 0.0,
         axis=1,
     )
     grouped["Location"] = grouped["store_number"].apply(lambda x: f"{x} - {loc_map.get(int(x), 'Unknown')}")
@@ -334,8 +354,8 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
     avg_turn = df["turn_time"].mean() if not df.empty else 0.0
     avg_bev = weighted_bev_pct(df)
     total_sales = df["sales"].sum() if not df.empty else 0.0
-    total_checks = df["check_count"].sum() if not df.empty else 0.0
-    ppa = (total_sales / total_checks) if total_checks > 0 else 0.0
+    total_guests = df["guest_count"].sum() if not df.empty else 0.0
+    ppa = (total_sales / total_guests) if total_guests > 0 else 0.0
 
     server_summary = build_server_summary(df)
     total_servers = len(server_summary)
@@ -490,6 +510,7 @@ def render_sync_freshness():
         local_tz = ZoneInfo("America/Chicago")
         last_attempted_ts = pd.to_datetime(last_attempted, utc=True).tz_convert(local_tz)
         last_attempted_text = last_attempted_ts.strftime("%b %d, %Y %I:%M %p %Z")
+
     st.markdown(
         f"""
         <div style="
@@ -537,8 +558,8 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
     avg_turn = raw_df["turn_time"].mean() if not raw_df.empty else 0.0
     avg_bev = weighted_bev_pct(raw_df)
     total_sales = raw_df["sales"].sum() if not raw_df.empty else 0.0
-    total_checks = raw_df["check_count"].sum() if not raw_df.empty else 0.0
-    avg_ppa = (total_sales / total_checks) if total_checks > 0 else 0.0
+    total_guests = raw_df["guest_count"].sum() if not raw_df.empty else 0.0
+    avg_ppa = (total_sales / total_guests) if total_guests > 0 else 0.0
 
     all_green = server_df[
         (server_df["turn_time"] <= 40) &
@@ -892,12 +913,10 @@ with tab4:
 
     def roadmap_card(title, items, color):
         rows = ""
-
         for text, status in items:
             extra = ""
             if status == "LIVE":
                 extra = f'<div style="color:#22c55e; font-size:12px; margin-top:2px;">Live as of {APP_VERSION}</div>'
-
             rows += f"<li style='margin-bottom:10px;'>{text} {status_tag(status)}{extra}</li>"
 
         return f"""
