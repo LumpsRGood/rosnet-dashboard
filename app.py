@@ -684,8 +684,12 @@ if df.empty:
     st.warning("Data was returned, but none of it matched the fields required by the dashboard.")
     st.stop()
 
-tab1, tab2, tab3 = st.tabs(["📊 Overview", "👨‍🍳 Server Performance", "Raw Dataset Summary"])
-
+tab1, tab2, tab3, tab4 = st.tabs([
+    "📊 Overview",
+    "👨‍🍳 Server Performance",
+    "🧾 Dataset",
+    "🚀 Coming Attractions"
+])
 with tab1:
     render_kpi_cards(df, header_label=header_label)
 
@@ -748,3 +752,123 @@ st.markdown(
     f"<br><hr><center><small>Powered by Rosnet Sync + Supabase | {APP_VERSION}</small></center>",
     unsafe_allow_html=True,
 )
+
+with tab4:
+    st.markdown("## 🚀 Coming Attractions")
+    st.markdown("What’s cooking behind the scenes...")
+
+    def status_tag(label):
+        colors = {
+            "LIVE": "#22c55e",
+            "IN PROGRESS": "#f59e0b",
+            "PLANNED": "#64748b",
+        }
+        color = colors.get(label, "#64748b")
+        return f"""
+        <span style="
+            background:{color};
+            color:white;
+            padding:3px 10px;
+            border-radius:999px;
+            font-size:11px;
+            font-weight:600;
+            margin-left:8px;
+        ">
+            {label}
+        </span>
+        """
+
+    def roadmap_card(title, items, color):
+        rows = ""
+        for text, status in items:
+            rows += f"<li>{text} {status_tag(status)}</li>"
+
+        return f"""
+        <div style="
+            border:1px solid {color};
+            border-radius:18px;
+            padding:22px;
+            background:rgba(255,255,255,0.02);
+            min-height:230px;
+        ">
+            <div style="color:{color}; font-size:16px; font-weight:700; margin-bottom:12px;">
+                {title}
+            </div>
+            <ul style="margin-left:18px; line-height:1.7;">
+                {rows}
+            </ul>
+        </div>
+        """
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown(
+            roadmap_card(
+                "🔥 Next Up",
+                [
+                    ("+/- vs Previous Period", "IN PROGRESS"),
+                    ("Trend Indicators (↑ ↓)", "PLANNED"),
+                    ("Top & Bottom Movers", "PLANNED"),
+                    ("Enhanced WhatsApp Exports", "IN PROGRESS"),
+                ],
+                "#22c55e",
+            ),
+            unsafe_allow_html=True,
+        )
+
+    with col2:
+        st.markdown(
+            roadmap_card(
+                "🧠 Smarter Insights",
+                [
+                    ("Coaching Callouts", "PLANNED"),
+                    ("Highlight Underperformers", "PLANNED"),
+                    ("Server Search & Filters", "PLANNED"),
+                    ("Minimum Check Threshold", "PLANNED"),
+                ],
+                "#f59e0b",
+            ),
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("")
+
+    col3, col4 = st.columns(2)
+
+    with col3:
+        st.markdown(
+            roadmap_card(
+                "📈 Data Evolution",
+                [
+                    ("WTD / MTD Comparisons", "PLANNED"),
+                    ("Store Rank Movement", "PLANNED"),
+                    ("Historical Trends", "PLANNED"),
+                    ("LY Comparisons", "PLANNED"),
+                ],
+                "#3b82f6",
+            ),
+            unsafe_allow_html=True,
+        )
+
+    with col4:
+        st.markdown(
+            roadmap_card(
+                "⚙️ System & Backend",
+                [
+                    ("Sync Freshness Indicator", "IN PROGRESS"),
+                    ("Store Sync Coverage", "PLANNED"),
+                    ("Admin Diagnostics View", "PLANNED"),
+                    ("Data Quality Safeguards", "PLANNED"),
+                ],
+                "#a855f7",
+            ),
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("---")
+
+    st.markdown(
+        "<center><i>This dashboard is evolving fast. Every update is built to drive One More Visit.</i></center>",
+        unsafe_allow_html=True,
+    )
