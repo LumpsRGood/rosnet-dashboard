@@ -17,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-APP_VERSION = "v1.6.0"
+APP_VERSION = "v1.6.1"
 
 
 @st.dialog("Data Availability")
@@ -239,11 +239,9 @@ def style_location_summary(df: pd.DataFrame):
             "PPA": "${:.2f}",
         }
     )
-
     styler = styler.map(color_turn, subset=["Turn Time"])
     styler = styler.map(color_bev, subset=["Bev %"])
     styler = styler.map(color_ppa, subset=["PPA"])
-
     return styler
 
 
@@ -291,11 +289,9 @@ def style_server_summary(df: pd.DataFrame):
             "PPA": "${:.2f}",
         }
     )
-
     styler = styler.map(color_turn, subset=["Turn Time"])
     styler = styler.map(color_bev, subset=["Dine In Bev %"])
     styler = styler.map(color_ppa, subset=["PPA"])
-
     return styler
 
 
@@ -322,25 +318,51 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
 
     best_turn = server_summary.loc[server_summary["turn_time"].idxmin(), "employee_name"] if total_servers else "N/A"
     slowest_turn = server_summary.loc[server_summary["turn_time"].idxmax(), "employee_name"] if total_servers else "N/A"
-
     top_bev = server_summary.loc[server_summary["beverage_pct"].idxmax(), "employee_name"] if total_servers else "N/A"
     bottom_bev = server_summary.loc[server_summary["beverage_pct"].idxmin(), "employee_name"] if total_servers else "N/A"
-
     top_ppa = server_summary.loc[server_summary["ppa"].idxmax(), "employee_name"] if total_servers else "N/A"
     bottom_ppa = server_summary.loc[server_summary["ppa"].idxmin(), "employee_name"] if total_servers else "N/A"
+
+    def safe_name(text, max_len=24):
+        text = str(text)
+        return text if len(text) <= max_len else text[: max_len - 3] + "..."
+
+    best_turn = safe_name(best_turn)
+    slowest_turn = safe_name(slowest_turn)
+    top_bev = safe_name(top_bev)
+    bottom_bev = safe_name(bottom_bev)
+    top_ppa = safe_name(top_ppa)
+    bottom_ppa = safe_name(bottom_ppa)
 
     ppa_border, ppa_bg = format_ppa_status(ppa)
 
     cols = st.columns(4)
 
+    card_style_base = """
+        border-radius:18px;
+        padding:24px;
+        min-height:250px;
+        height:250px;
+        display:flex;
+        flex-direction:column;
+        justify-content:space-between;
+        overflow:hidden;
+    """
+
+    label_style = "font-size:14px; font-weight:700; letter-spacing:1px;"
+    value_style = "font-size:46px; font-weight:800; color:white; line-height:1.0; margin-top:10px;"
+    detail_style = "font-size:16px; color:white; line-height:1.35; min-height:58px;"
+
     with cols[0]:
         st.markdown(
             f"""
-            <div style="border:1px solid #8a6d1f; border-radius:18px; padding:24px; background:#2f2918; min-height:220px;">
-                <div style="color:#f0b90b; font-size:14px; font-weight:700; letter-spacing:1px;">AVG TURN TIME</div>
-                <div style="font-size:46px; font-weight:800; margin-top:16px; color:white;">{avg_turn:.2f}</div>
-                <div style="margin-top:20px; font-size:16px; color:white;">Best: <b>{best_turn}</b></div>
-                <div style="font-size:16px; color:white;">Slow: <b>{slowest_turn}</b></div>
+            <div style="border:1px solid #8a6d1f; background:#2f2918; {card_style_base}">
+                <div style="color:#f0b90b; {label_style}">AVG TURN TIME</div>
+                <div style="{value_style}">{avg_turn:.2f}</div>
+                <div style="{detail_style}">
+                    <div>Best: <b>{best_turn}</b></div>
+                    <div>Slow: <b>{slowest_turn}</b></div>
+                </div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -349,11 +371,13 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
     with cols[1]:
         st.markdown(
             f"""
-            <div style="border:1px solid #8d2b2b; border-radius:18px; padding:24px; background:#35191d; min-height:220px;">
-                <div style="color:#ff4b4b; font-size:14px; font-weight:700; letter-spacing:1px;">AVG DINE IN BEV %</div>
-                <div style="font-size:46px; font-weight:800; margin-top:16px; color:white;">{avg_bev:.2f}%</div>
-                <div style="margin-top:20px; font-size:16px; color:white;">Top: <b>{top_bev}</b></div>
-                <div style="font-size:16px; color:white;">Bot: <b>{bottom_bev}</b></div>
+            <div style="border:1px solid #8d2b2b; background:#35191d; {card_style_base}">
+                <div style="color:#ff4b4b; {label_style}">AVG DINE IN BEV %</div>
+                <div style="{value_style}">{avg_bev:.2f}%</div>
+                <div style="{detail_style}">
+                    <div>Top: <b>{top_bev}</b></div>
+                    <div>Bot: <b>{bottom_bev}</b></div>
+                </div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -362,11 +386,13 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
     with cols[2]:
         st.markdown(
             f"""
-            <div style="border:1px solid {ppa_border}; border-radius:18px; padding:24px; background:{ppa_bg}; min-height:220px;">
-                <div style="color:{ppa_border}; font-size:14px; font-weight:700; letter-spacing:1px;">PPA</div>
-                <div style="font-size:46px; font-weight:800; margin-top:16px; color:white;">${ppa:.2f}</div>
-                <div style="margin-top:20px; font-size:16px; color:white;">Top: <b>{top_ppa}</b></div>
-                <div style="font-size:16px; color:white;">Bot: <b>{bottom_ppa}</b></div>
+            <div style="border:1px solid {ppa_border}; background:{ppa_bg}; {card_style_base}">
+                <div style="color:{ppa_border}; {label_style}">PPA</div>
+                <div style="{value_style}">${ppa:.2f}</div>
+                <div style="{detail_style}">
+                    <div>Top: <b>{top_ppa}</b></div>
+                    <div>Bot: <b>{bottom_ppa}</b></div>
+                </div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -375,10 +401,13 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
     with cols[3]:
         st.markdown(
             f"""
-            <div style="border:1px solid #7c3aed; border-radius:18px; padding:24px; background:#24163d; min-height:220px;">
-                <div style="color:#a855f7; font-size:14px; font-weight:700; letter-spacing:1px;">ALL-GREEN</div>
-                <div style="font-size:46px; font-weight:800; margin-top:16px; color:white;">{all_green_count} of {total_servers}</div>
-                <div style="margin-top:20px; font-size:16px; color:white;">Turn ≤40m & Bev ≥19%</div>
+            <div style="border:1px solid #7c3aed; background:#24163d; {card_style_base}">
+                <div style="color:#a855f7; {label_style}">ALL-GREEN</div>
+                <div style="{value_style}">{all_green_count} of {total_servers}</div>
+                <div style="{detail_style}">
+                    <div>Turn ≤40m & Bev ≥19%</div>
+                    <div>&nbsp;</div>
+                </div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -431,12 +460,10 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
 
     ax.add_patch(Rectangle((0.015, 0.015), 0.97, 0.97, facecolor="#f3f4f6", edgecolor="#d1d5db", linewidth=1.2))
 
-    # Header
     ax.add_patch(Rectangle((0.02, 0.88), 0.96, 0.1, facecolor="#2c5aa0", edgecolor="#2c5aa0"))
     ax.text(0.04, 0.94, title, fontsize=22, fontweight="bold", color="white", va="center")
     ax.text(0.04, 0.905, subtitle, fontsize=13, color="#dbeafe", va="center", style="italic")
 
-    # KPI cards
     card_y = 0.62
     card_h = 0.18
     card_w = 0.22
@@ -459,7 +486,6 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
         if line2:
             ax.text(x_positions[i] + 0.012, card_y + 0.02, line2, fontsize=9.5, color="#111827", va="center")
 
-    # Table
     display_df["Turn Time"] = display_df["Turn Time"].map(lambda x: f"{x:.2f}")
     display_df["Dine In Bev %"] = display_df["Dine In Bev %"].map(lambda x: f"{x:.2f}%")
     display_df["PPA"] = display_df["PPA"].map(lambda x: f"${x:.2f}")
@@ -679,19 +705,6 @@ with tab2:
     else:
         render_kpi_cards(df, header_label="MARKET TOTAL")
 
-        market_png = build_whatsapp_png(
-            "MARKET TOTAL",
-            f"{start_date.strftime('%b %d, %Y')} to {end_date.strftime('%b %d, %Y')}",
-            df,
-        )
-        st.download_button(
-            "Download MARKET TOTAL WhatsApp Image",
-            data=market_png,
-            file_name="market_total_whatsapp.png",
-            mime="image/png",
-            key="market_total_png",
-        )
-
         unique_locs = sorted(df["store_number"].dropna().astype(int).unique())
 
         for loc in unique_locs:
@@ -708,6 +721,12 @@ with tab2:
 
             server_df = build_server_summary(loc_df)
 
+            st.dataframe(
+                style_server_summary(server_df),
+                use_container_width=True,
+                height=min(500, 45 + len(server_df) * 35),
+            )
+
             png_bytes = build_whatsapp_png(
                 store_name,
                 f"{start_date.strftime('%b %d, %Y')} to {end_date.strftime('%b %d, %Y')}",
@@ -719,12 +738,6 @@ with tab2:
                 file_name=f"{store_name.lower().replace(' ', '_')}_whatsapp.png",
                 mime="image/png",
                 key=f"png_{loc}",
-            )
-
-            st.dataframe(
-                style_server_summary(server_df),
-                use_container_width=True,
-                height=min(500, 45 + len(server_df) * 35),
             )
 
 with tab3:
