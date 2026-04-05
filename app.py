@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import api
-from components import style_metric_cards, render_table_turns, render_combined_leaderboard
 
 st.set_page_config(
     page_title="Rosnet Insights Dashboard",
@@ -14,9 +13,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-style_metric_cards()
-
-APP_VERSION = "v1.3.0"
+APP_VERSION = "v1.4.0"
 
 
 @st.dialog("Data Availability")
@@ -68,123 +65,209 @@ def get_data_from_db(start_date, end_date, locations=None):
     return df
 
 
-def prepare_display_df(df):
+def weighted_bev_pct(df: pd.DataFrame) -> float:
+    if df.empty:
+        return 0.0
+    total_sales = df["sales"].sum()
+    if total_sales <= 0:
+        return 0.0
+    bev_dollars_est = (df["sales"] * (df["beverage_pct"] / 100.0)).sum()
+    return (bev_dollars_est / total_sales) * 100.0
+
+
+def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df.copy()
 
-    out = df.rename(
-        columns={
-            "employee_name": "serverName",
-            "sales": "netSales",
-            "beverage_pct": "beverageSales",
-            "turn_time": "turnTimeMinutes",
-            "check_count": "checkNumber",
-            "store_number": "locationId",
-            "business_date": "businessDate",
-        }
-    ).copy()
+    out = df.copy()
 
-    out["locationId"] = pd.to_numeric(out["locationId"], errors="coerce").astype("Int64")
-    out["businessDate"] = pd.to_datetime(out["businessDate"], errors="coerce").dt.date
-    out["turnTimeMinutes"] = pd.to_numeric(out["turnTimeMinutes"], errors="coerce")
-    out["beverageSales"] = pd.to_numeric(out["beverageSales"], errors="coerce")
-    out["netSales"] = pd.to_numeric(out["netSales"], errors="coerce")
-    out["checkNumber"] = pd.to_numeric(out["checkNumber"], errors="coerce")
+    numeric_cols = ["store_number", "ppa", "beverage_pct", "turn_time", "check_count", "sales"]
+    for col in numeric_cols:
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
+
+    if "business_date" in out.columns:
+        out["business_date"] = pd.to_datetime(out["business_date"], errors="coerce").dt.date
 
     out = out.dropna(
-        subset=["locationId", "businessDate", "serverName", "turnTimeMinutes", "beverageSales", "netSales", "checkNumber"]
+        subset=["store_number", "business_date", "employee_name", "ppa", "beverage_pct", "turn_time", "check_count", "sales"]
     ).copy()
 
+    out["store_number"] = out["store_number"].astype(int)
     return out
 
 
-def ppa_status(ppa_value: float) -> str:
-    if ppa_value >= 21:
-        return "green"
-    if ppa_value >= 20:
-        return "yellow"
-    return "red"
+def format_ppa_status(ppa: float):
+    if ppa >= 21:
+        return "#21c55d", "#13281c", "vs $21.00 Goal"
+    if ppa >= 20:
+        return "#eab308", "#2e270f", "vs $21.00 Goal"
+    return "#ef4444", "#321717", "vs $21.00 Goal"
 
 
-def render_kpi_cards(df, title_label="COMPANY TOTAL", include_ppa=True):
-    st.markdown(f"### {title_label}")
-
-    avg_turn = df["turnTimeMinutes"].mean() if not df.empty else 0.0
-    avg_bev = df["beverageSales"].mean() if not df.empty else 0.0
-
-    total_sales = df["netSales"].sum() if not df.empty else 0.0
-    total_checks = df["checkNumber"].sum() if not df.empty else 0.0
-    ppa = (total_sales / total_checks) if total_checks > 0 else 0.0
-
-    turn_delta = round(avg_turn - 45, 1)
-    bev_delta = round(avg_bev - 19, 1)
-
-    if include_ppa:
-        cols = st.columns(4)
-    else:
-        cols = st.columns(3)
-
-    cols[0].metric(
-        "Avg Turn Time",
-        f"{avg_turn:.1f} min",
-        f"{turn_delta:+.1f} min vs 45m Goal",
-        delta_color="inverse",
-    )
-
-    cols[1].metric(
-        "Dine In Bev %",
-        f"{avg_bev:.1f}%",
-        f"{bev_delta:+.1f}% vs 19% Goal",
-    )
-
-    cols[2].metric("Turn Time Goal", "45 min")
-
-    if include_ppa:
-        ppa_color = ppa_status(ppa)
-        if ppa_color == "green":
-            ppa_label = "🟢"
-        elif ppa_color == "yellow":
-            ppa_label = "🟡"
-        else:
-            ppa_label = "🔴"
-
-        cols[3].metric(
-            "PPA",
-            f"${ppa:.2f}",
-            f"{ppa_label} vs $21.00 Goal",
-        )
-
-
-def build_location_summary(df, loc_map):
+def build_server_summary(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=["employee_name", "turn_time", "beverage_pct", "ppa", "check_count", "sales"])
 
-    summary = (
-        df.groupby("locationId", dropna=False)
+    grouped = (
+        df.groupby("employee_name", dropna=False)
         .agg(
-            turnTimeMinutes=("turnTimeMinutes", "mean"),
-            beverageSales=("beverageSales", "mean"),
-            netSales=("netSales", "sum"),
-            checkNumber=("checkNumber", "sum"),
+            turn_time=("turn_time", "mean"),
+            beverage_dollars=("sales", lambda s: 0.0),
+            sales=("sales", "sum"),
+            check_count=("check_count", "sum"),
         )
         .reset_index()
     )
 
-    summary["PPA"] = summary.apply(
-        lambda r: (r["netSales"] / r["checkNumber"]) if r["checkNumber"] > 0 else 0.0,
-        axis=1
-    )
-    summary["Location"] = summary["locationId"].apply(lambda x: f"{int(x)} - {loc_map.get(int(x), 'Unknown')}")
-    summary = summary.rename(
-        columns={
-            "turnTimeMinutes": "Turn Time",
-            "beverageSales": "Bev %",
-            "netSales": "Sales",
-            "checkNumber": "Checks",
-        }
+    bev_source = (
+        df.assign(beverage_dollars=df["sales"] * (df["beverage_pct"] / 100.0))
+        .groupby("employee_name", dropna=False)
+        .agg(beverage_dollars=("beverage_dollars", "sum"))
+        .reset_index()
     )
 
-    return summary[["Location", "Turn Time", "Bev %", "PPA", "Checks", "Sales"]].sort_values("PPA", ascending=False)
+    grouped = grouped.drop(columns=["beverage_dollars"]).merge(bev_source, on="employee_name", how="left")
+    grouped["beverage_pct"] = grouped.apply(
+        lambda r: (r["beverage_dollars"] / r["sales"] * 100.0) if r["sales"] > 0 else 0.0,
+        axis=1,
+    )
+    grouped["ppa"] = grouped.apply(
+        lambda r: (r["sales"] / r["check_count"]) if r["check_count"] > 0 else 0.0,
+        axis=1,
+    )
+
+    return grouped[["employee_name", "turn_time", "beverage_pct", "ppa", "check_count", "sales"]].sort_values(
+        "ppa", ascending=False
+    )
+
+
+def build_location_summary(df: pd.DataFrame, loc_map: dict) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame(columns=["Location", "Turn Time", "Bev %", "PPA", "Checks", "Sales"])
+
+    grouped = (
+        df.groupby("store_number", dropna=False)
+        .agg(
+            turn_time=("turn_time", "mean"),
+            sales=("sales", "sum"),
+            check_count=("check_count", "sum"),
+        )
+        .reset_index()
+    )
+
+    bev_source = (
+        df.assign(beverage_dollars=df["sales"] * (df["beverage_pct"] / 100.0))
+        .groupby("store_number", dropna=False)
+        .agg(beverage_dollars=("beverage_dollars", "sum"))
+        .reset_index()
+    )
+
+    grouped = grouped.merge(bev_source, on="store_number", how="left")
+    grouped["beverage_pct"] = grouped.apply(
+        lambda r: (r["beverage_dollars"] / r["sales"] * 100.0) if r["sales"] > 0 else 0.0,
+        axis=1,
+    )
+    grouped["ppa"] = grouped.apply(
+        lambda r: (r["sales"] / r["check_count"]) if r["check_count"] > 0 else 0.0,
+        axis=1,
+    )
+    grouped["Location"] = grouped["store_number"].apply(lambda x: f"{x} - {loc_map.get(int(x), 'Unknown')}")
+
+    out = grouped.rename(
+        columns={
+            "turn_time": "Turn Time",
+            "beverage_pct": "Bev %",
+            "ppa": "PPA",
+            "check_count": "Checks",
+            "sales": "Sales",
+        }
+    )[["Location", "Turn Time", "Bev %", "PPA", "Checks", "Sales"]]
+
+    return out.sort_values("PPA", ascending=False).reset_index(drop=True)
+
+
+def render_kpi_cards(df: pd.DataFrame, header_label: str):
+    st.markdown(f"## {header_label}")
+
+    avg_turn = df["turn_time"].mean() if not df.empty else 0.0
+    avg_bev = weighted_bev_pct(df)
+    total_sales = df["sales"].sum() if not df.empty else 0.0
+    total_checks = df["check_count"].sum() if not df.empty else 0.0
+    ppa = (total_sales / total_checks) if total_checks > 0 else 0.0
+
+    server_summary = build_server_summary(df)
+    total_servers = len(server_summary)
+
+    all_green = server_summary[
+        (server_summary["turn_time"] <= 40) &
+        (server_summary["beverage_pct"] >= 19)
+    ]
+    all_green_count = len(all_green)
+
+    best_turn = server_summary.loc[server_summary["turn_time"].idxmin(), "employee_name"] if total_servers else "N/A"
+    slowest_turn = server_summary.loc[server_summary["turn_time"].idxmax(), "employee_name"] if total_servers else "N/A"
+
+    top_bev = server_summary.loc[server_summary["beverage_pct"].idxmax(), "employee_name"] if total_servers else "N/A"
+    bottom_bev = server_summary.loc[server_summary["beverage_pct"].idxmin(), "employee_name"] if total_servers else "N/A"
+
+    top_ppa = server_summary.loc[server_summary["ppa"].idxmax(), "employee_name"] if total_servers else "N/A"
+    bottom_ppa = server_summary.loc[server_summary["ppa"].idxmin(), "employee_name"] if total_servers else "N/A"
+
+    ppa_border, ppa_bg, ppa_note = format_ppa_status(ppa)
+
+    cols = st.columns(4)
+
+    with cols[0]:
+        st.markdown(
+            f"""
+            <div style="border:1px solid #8a6d1f; border-radius:18px; padding:24px; background:#2f2918; min-height:220px;">
+                <div style="color:#f0b90b; font-size:14px; font-weight:700; letter-spacing:1px;">AVG TURN TIME</div>
+                <div style="font-size:46px; font-weight:800; margin-top:16px; color:white;">{avg_turn:.1f} min</div>
+                <div style="margin-top:20px; font-size:16px; color:white;">Best: <b>{best_turn}</b></div>
+                <div style="font-size:16px; color:white;">Slowest: <b>{slowest_turn}</b></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with cols[1]:
+        st.markdown(
+            f"""
+            <div style="border:1px solid #8d2b2b; border-radius:18px; padding:24px; background:#35191d; min-height:220px;">
+                <div style="color:#ff4b4b; font-size:14px; font-weight:700; letter-spacing:1px;">AVG DINE IN BEV %</div>
+                <div style="font-size:46px; font-weight:800; margin-top:16px; color:white;">{avg_bev:.1f}%</div>
+                <div style="margin-top:20px; font-size:16px; color:white;">Top: <b>{top_bev}</b></div>
+                <div style="font-size:16px; color:white;">Bottom: <b>{bottom_bev}</b></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with cols[2]:
+        st.markdown(
+            f"""
+            <div style="border:1px solid {ppa_border}; border-radius:18px; padding:24px; background:{ppa_bg}; min-height:220px;">
+                <div style="color:{ppa_border}; font-size:14px; font-weight:700; letter-spacing:1px;">PPA</div>
+                <div style="font-size:46px; font-weight:800; margin-top:16px; color:white;">${ppa:.2f}</div>
+                <div style="margin-top:20px; font-size:16px; color:white;">Top: <b>{top_ppa}</b></div>
+                <div style="font-size:16px; color:white;">Bottom: <b>{bottom_ppa}</b></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with cols[3]:
+        st.markdown(
+            f"""
+            <div style="border:1px solid #7c3aed; border-radius:18px; padding:24px; background:#24163d; min-height:220px;">
+                <div style="color:#a855f7; font-size:14px; font-weight:700; letter-spacing:1px;">ALL-GREEN SERVERS</div>
+                <div style="font-size:46px; font-weight:800; margin-top:16px; color:white;">{all_green_count} of {total_servers}</div>
+                <div style="margin-top:20px; font-size:16px; color:white;">Turn ≤40m & Bev ≥19%</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 # -----------------------------
@@ -256,7 +339,6 @@ st.sidebar.info(
     f"Selected: **{start_date.strftime('%b %d, %Y')}** to **{end_date.strftime('%b %d, %Y')}**"
 )
 
-# Dynamic locations only
 with st.spinner("Loading Locations..."):
     try:
         raw_locations = api.get_locations()
@@ -286,14 +368,13 @@ selected_locations = st.sidebar.multiselect(
 )
 
 # -----------------------------
-# Main Data Load
+# Main
 # -----------------------------
 st.title("*Almost* Live Rosnet Turn and Beverage Data 📈")
 st.warning(
     "🚧 **Under Development:** This dashboard is currently in active testing. Errors may occasionally occur. Please contact **Chad** with any issues, feedback, or UI suggestions."
 )
 
-# No selection = company total
 active_locations = selected_locations if selected_locations else None
 header_label = "MARKET TOTAL" if selected_locations else "COMPANY TOTAL"
 
@@ -311,66 +392,71 @@ if raw_df.empty:
     )
     st.stop()
 
-filtered_df = prepare_display_df(raw_df)
+df = prepare_display_df(raw_df)
 
-if filtered_df.empty:
-    st.warning("Data was returned, but it did not match the required dashboard fields.")
+if df.empty:
+    st.warning("Data was returned, but none of it matched the fields required by the dashboard.")
     st.stop()
 
-# -----------------------------
-# Tabs
-# -----------------------------
 tab1, tab2, tab3 = st.tabs(["📊 Overview", "👨‍🍳 Server Performance", "Raw Dataset Summary"])
 
 with tab1:
-    render_kpi_cards(filtered_df, title_label=header_label, include_ppa=True)
+    render_kpi_cards(df, header_label=header_label)
 
     st.markdown("---")
     st.markdown("### Location Breakdown")
 
-    summary_df = build_location_summary(filtered_df, loc_map)
-    st.dataframe(summary_df, use_container_width=True, height=500)
+    summary_df = build_location_summary(df, loc_map)
+
+    st.dataframe(
+        summary_df.style.format(
+            {
+                "Turn Time": "{:.1f}",
+                "Bev %": "{:.1f}%",
+                "PPA": "${:.2f}",
+                "Checks": "{:.0f}",
+                "Sales": "${:,.2f}",
+            }
+        ),
+        use_container_width=True,
+        height=500,
+    )
 
 with tab2:
     if not selected_locations:
         st.info("Select one or more locations from the main page to view server performance.")
     else:
-        render_kpi_cards(filtered_df, title_label="MARKET TOTAL", include_ppa=True)
+        render_kpi_cards(df, header_label="MARKET TOTAL")
 
-        if start_date == end_date:
-            _date_str = start_date.strftime("%b %d, %Y")
-        else:
-            _date_str = f"{start_date.strftime('%b %d')} – {end_date.strftime('%b %d, %Y')}"
-
-        st.markdown("---")
-        st.markdown("### MARKET TOTAL")
-        render_combined_leaderboard(
-            filtered_df,
-            key="market_total_leaderboard",
-            title="MARKET TOTAL",
-            date_range_str=_date_str,
-        )
-
-        unique_locs = filtered_df["locationId"].dropna().astype(int).unique()
+        unique_locs = sorted(df["store_number"].dropna().astype(int).unique())
 
         for loc in unique_locs:
-            loc_df = filtered_df[filtered_df["locationId"].astype(int) == int(loc)].copy()
+            loc_df = df[df["store_number"] == int(loc)].copy()
             if loc_df.empty:
                 continue
 
             st.markdown("---")
-            st.markdown(f"#### 📍 {loc_map.get(int(loc), str(loc))}")
-            render_kpi_cards(loc_df, title_label="MARKET TOTAL", include_ppa=True)
-            render_combined_leaderboard(
-                loc_df,
-                key=f"store_leaderboard_{loc}",
-                title=loc_map.get(int(loc), str(loc)),
-                date_range_str=_date_str,
+            st.markdown(f"### 📍 {loc_map.get(int(loc), str(loc))}")
+
+            server_df = build_server_summary(loc_df)
+
+            st.dataframe(
+                server_df.style.format(
+                    {
+                        "turn_time": "{:.1f}",
+                        "beverage_pct": "{:.1f}%",
+                        "ppa": "${:.2f}",
+                        "check_count": "{:.0f}",
+                        "sales": "${:,.2f}",
+                    }
+                ),
+                use_container_width=True,
+                height=min(500, 45 + len(server_df) * 35),
             )
 
 with tab3:
     st.markdown("### Combined Stored Dataset")
-    st.dataframe(filtered_df, use_container_width=True, height=600)
+    st.dataframe(df, use_container_width=True, height=600)
 
 st.markdown(
     f"<br><hr><center><small>Powered by Rosnet Sync + Supabase | {APP_VERSION}</small></center>",
