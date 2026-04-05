@@ -485,7 +485,7 @@ def render_sync_freshness():
             bg_color = "#321717"
 
     if pd.isna(last_attempted):
-    last_attempted_text = "Unknown"
+        last_attempted_text = "Unknown"
         else:
             local_tz = ZoneInfo("America/Chicago")
             last_attempted_ts = pd.to_datetime(last_attempted, utc=True).tz_convert(local_tz)
