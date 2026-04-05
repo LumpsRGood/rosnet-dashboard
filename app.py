@@ -233,21 +233,21 @@ def style_location_summary(df: pd.DataFrame):
             return "background-color: #3a3112; color: #fef3c7;"
         return "background-color: #3b1a1a; color: #fecaca;"
 
-    return (
-        df.style
-        .format(
-            {
-                "Turn Time": "{:.1f}",
-                "Bev %": "{:.1f}%",
-                "PPA": "${:.2f}",
-                "Checks": "{:.0f}",
-                "Sales": "${:,.2f}",
-            }
-        )
-        .applymap(color_turn, subset=["Turn Time"])
-        .applymap(color_bev, subset=["Bev %"])
-        .applymap(color_ppa, subset=["PPA"])
+    styler = df.style.format(
+        {
+            "Turn Time": "{:.1f}",
+            "Bev %": "{:.1f}%",
+            "PPA": "${:.2f}",
+            "Checks": "{:.0f}",
+            "Sales": "${:,.2f}",
+        }
     )
+
+    styler = styler.map(color_turn, subset=["Turn Time"])
+    styler = styler.map(color_bev, subset=["Bev %"])
+    styler = styler.map(color_ppa, subset=["PPA"])
+
+    return styler
 
 
 def style_server_summary(df: pd.DataFrame):
@@ -278,21 +278,21 @@ def style_server_summary(df: pd.DataFrame):
             return "background-color: #3a3112; color: #fef3c7;"
         return "background-color: #3b1a1a; color: #fecaca;"
 
-    return (
-        df.style
-        .format(
-            {
-                "turn_time": "{:.1f}",
-                "beverage_pct": "{:.1f}%",
-                "ppa": "${:.2f}",
-                "check_count": "{:.0f}",
-                "sales": "${:,.2f}",
-            }
-        )
-        .applymap(color_turn, subset=["turn_time"])
-        .applymap(color_bev, subset=["beverage_pct"])
-        .applymap(color_ppa, subset=["ppa"])
+    styler = df.style.format(
+        {
+            "turn_time": "{:.1f}",
+            "beverage_pct": "{:.1f}%",
+            "ppa": "${:.2f}",
+            "check_count": "{:.0f}",
+            "sales": "${:,.2f}",
+        }
     )
+
+    styler = styler.map(color_turn, subset=["turn_time"])
+    styler = styler.map(color_bev, subset=["beverage_pct"])
+    styler = styler.map(color_ppa, subset=["ppa"])
+
+    return styler
 
 
 # -----------------------------
