@@ -1,44 +1,276 @@
-import io
+import streamlit as st
+import pandas as pd
+import psycopg2
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-import matplotlib.pyplot as plt
-import pandas as pd
-import psycopg2
-import streamlit as st
-from matplotlib.patches import Rectangle
+# -----------------------------
+# CONFIG
+# -----------------------------
+APP_VERSION = "v1.8.1"
 
 st.set_page_config(
-    page_title="Rosnet Insights Dashboard",
-    page_icon="🍔",
-    layout="wide",
-    initial_sidebar_state="expanded",
+    page_title="Peachtree Performance Dashboard",
+    layout="wide"
 )
 
-APP_VERSION = "v1.8.0"
-
-
-@st.dialog("Data Availability")
-def show_realtime_warning():
-    st.warning("Real-time data is not available.")
-    st.write(
-        "This data is historical only. Please change your date selection in the sidebar to a range ending yesterday or earlier."
-    )
-
-
 # -----------------------------
-# DB helpers
+# DB CONNECTION
 # -----------------------------
 def get_db_connection():
     return psycopg2.connect(
-        host=st.secrets["database"]["host"],
-        port=st.secrets["database"]["port"],
-        dbname=st.secrets["database"]["dbname"],
-        user=st.secrets["database"]["user"],
-        password=st.secrets["database"]["password"],
+        host=st.secrets["DB_HOST"],
+        port=st.secrets["DB_PORT"],
+        dbname=st.secrets["DB_NAME"],
+        user=st.secrets["DB_USER"],
+        password=st.secrets["DB_PASSWORD"],
     )
 
+# -----------------------------
+# LOCATION MAP (NO API)
+# -----------------------------
+@st.cache_data(ttl=300)
+def get_location_map_from_db():
+    conn = get_db_connection()
+    try:
+        df = pd.read_sql(
+            """
+            SELECT store_number, store_name
+            FROM sync_progress
+            WHERE store_number IS NOT NULL
+              AND store_name IS NOT NULL
+            ORDER BY store_number
+            """,
+            conn,
+        )
+    finally:
+        conn.close()
 
+    if df.empty:
+        return {}
+
+    return {
+        int(row["store_number"]): row["store_name"]
+        for _, row in df.iterrows()
+    }
+
+# -----------------------------
+# SYNC STATUS (FOR FRESHNESS)
+# -----------------------------
+@st.cache_data(ttl=120)
+def get_sync_status():
+    conn = get_db_connection()
+    try:
+        df = pd.read_sql(
+            """
+            SELECT 
+                COUNT(*) AS total_stores,
+                COUNT(last_synced_date) AS synced_stores,
+                MAX(last_attempted_at) AS last_attempted_at
+            FROM sync_progress
+            """,
+            conn,
+        )
+    finally:
+        conn.close()
+
+    if df.empty:
+        return 0, 0, None
+
+    row = df.iloc[0]
+    return (
+        int(row["total_stores"]),
+        int(row["synced_stores"]),
+        row["last_attempted_at"],
+    )
+
+# -----------------------------
+# SIDEBAR FRESHNESS DISPLAY
+# -----------------------------
+def render_freshness_sidebar():
+    total, synced, last_sync = get_sync_status()
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 📡 Data Freshness")
+
+    if not last_sync:
+        st.sidebar.warning("No sync data yet")
+        return
+
+    try:
+        local_tz = ZoneInfo("America/Chicago")
+        last_sync_local = last_sync.astimezone(local_tz)
+    except:
+        last_sync_local = last_sync
+
+    now = datetime.now(last_sync_local.tzinfo)
+    diff_minutes = (now - last_sync_local).total_seconds() / 60
+
+    if diff_minutes < 30:
+        color = "#22c55e"
+        label = "Fresh"
+    elif diff_minutes < 120:
+        color = "#facc15"
+        label = "Delayed"
+    else:
+        color = "#ef4444"
+        label = "Stale"
+
+    percent = (synced / total * 100) if total > 0 else 0
+
+    st.sidebar.markdown(
+        f"""
+        <div style="
+            padding:12px;
+            border-radius:12px;
+            background:{color}20;
+            border:1px solid {color};
+        ">
+            <div style="font-weight:700; color:{color}; margin-bottom:6px;">
+                {label}
+            </div>
+
+            <div style="font-size:12px; margin-bottom:6px;">
+                Last Sync:<br>
+                {last_sync_local.strftime('%I:%M %p')}
+            </div>
+
+            <div style="font-size:12px;">
+                Progress: {synced} / {total} stores
+            </div>
+
+            <div style="
+                margin-top:6px;
+                height:6px;
+                background:#222;
+                border-radius:6px;
+                overflow:hidden;
+            ">
+                <div style="
+                    width:{percent}%;
+                    height:100%;
+                    background:{color};
+                "></div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+# -----------------------------
+# SIDEBAR / FILTERS
+# -----------------------------
+sidebar_col1, sidebar_col2, sidebar_col3 = st.sidebar.columns([1, 1.5, 1])
+with sidebar_col2:
+    try:
+        st.image("logo.png", use_container_width=True)
+    except Exception:
+        pass
+
+st.sidebar.markdown(
+    "<p style='text-align: center; color: gray; font-size: 0.9em; margin-top: -10px;'>Peachtree Partners Data Analysis</p>",
+    unsafe_allow_html=True,
+)
+st.sidebar.markdown(
+    f"<p style='text-align: center; color: gray; font-size: 0.7em; margin-top: -15px;'>{APP_VERSION}</p>",
+    unsafe_allow_html=True,
+)
+
+st.sidebar.header("Filter Selections Below")
+
+# -----------------------------
+# DATE LOGIC
+# -----------------------------
+try:
+    tz = ZoneInfo("America/New_York")
+    today = datetime.now(tz).date()
+except Exception:
+    today = datetime.now().date()
+
+yesterday = today - timedelta(days=1)
+
+date_method = st.sidebar.radio(
+    "Choose Your Timeframe",
+    ["Yesterday", "WTD", "MTD", "Custom"],
+    horizontal=True,
+)
+
+if date_method == "Yesterday":
+    start_date = end_date = yesterday
+
+elif date_method == "WTD":
+    start_date = today - timedelta(days=today.weekday())
+    end_date = yesterday
+    if start_date > end_date:
+        start_date = end_date
+
+elif date_method == "MTD":
+    start_date = today.replace(day=1)
+    end_date = yesterday
+    if start_date > end_date:
+        start_date = end_date
+
+else:
+    date_range = st.sidebar.date_input(
+        "Custom Date Range",
+        value=(yesterday - timedelta(days=6), yesterday),
+        max_value=yesterday,
+    )
+
+    if isinstance(date_range, tuple) and len(date_range) == 2:
+        start_date, end_date = date_range
+    elif isinstance(date_range, tuple) and len(date_range) == 1:
+        start_date = end_date = date_range[0]
+    else:
+        start_date = end_date = date_range
+
+    if start_date >= today or end_date >= today:
+        st.sidebar.error("Real-time data is unavailable. Please adjust the Custom Date Range.")
+        st.stop()
+
+st.sidebar.info(
+    f"Selected: **{start_date.strftime('%b %d, %Y')}** to **{end_date.strftime('%b %d, %Y')}**"
+)
+
+# -----------------------------
+# LOCATION LOADING (DB ONLY)
+# -----------------------------
+with st.spinner("Loading Locations..."):
+    try:
+        loc_map = get_location_map_from_db()
+        if not loc_map:
+            st.sidebar.error("Could not load locations from stored data yet.")
+            st.stop()
+    except Exception as e:
+        st.sidebar.error(f"Could not load locations from database: {e}")
+        st.stop()
+
+selected_locations = st.sidebar.multiselect(
+    "Choose Your Location(s)",
+    options=list(loc_map.keys()),
+    format_func=lambda x: f"{x} - {loc_map.get(x, 'Unknown')}",
+    default=[],
+)
+
+# -----------------------------
+# DATA FRESHNESS / PROGRESS
+# -----------------------------
+render_freshness_sidebar()
+
+# -----------------------------
+# MAIN HEADER
+# -----------------------------
+st.title("*Almost* Live Rosnet Turn and Beverage Data 📈")
+st.warning(
+    "🚧 **Under Development:** This dashboard is currently in active testing. Errors may occasionally occur. Please contact **Chad** with any issues, feedback, or UI suggestions."
+)
+
+active_locations = selected_locations if selected_locations else None
+header_label = "MARKET TOTAL" if selected_locations else "COMPANY TOTAL"
+
+# -----------------------------
+# DATA LOAD
+# -----------------------------
 @st.cache_data(ttl=300)
 def get_data_from_db(start_date, end_date, locations=None):
     conn = get_db_connection()
@@ -65,57 +297,6 @@ def get_data_from_db(start_date, end_date, locations=None):
         conn.close()
     return df
 
-
-@st.cache_data(ttl=120)
-def get_sync_freshness():
-    conn = get_db_connection()
-    try:
-        query = """
-            SELECT
-                MAX(last_synced_date) AS latest_business_date,
-                MAX(last_attempted_at) AS last_attempted_at,
-                COUNT(*) AS total_stores,
-                COUNT(*) FILTER (
-                    WHERE last_synced_date = (SELECT MAX(last_synced_date) FROM sync_progress)
-                ) AS synced_store_count
-            FROM sync_progress
-        """
-        df = pd.read_sql(query, conn)
-    except Exception:
-        conn.close()
-        return None
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
-
-    if df.empty:
-        return None
-
-    return df.iloc[0].to_dict()
-
-@st.cache_data(ttl=300)
-def get_location_map_from_db():
-    conn = get_db_connection()
-    try:
-        df = pd.read_sql(
-            """
-            SELECT store_number, store_name
-            FROM sync_progress
-            WHERE store_number IS NOT NULL
-              AND store_name IS NOT NULL
-            ORDER BY store_number
-            """,
-            conn,
-        )
-    finally:
-        conn.close()
-
-    if df.empty:
-        return {}
-
-    return {int(row["store_number"]): row["store_name"] for _, row in df.iterrows()}
 
 def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
@@ -157,8 +338,34 @@ def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+with st.spinner("Loading stored Rosnet data..."):
+    try:
+        raw_df = get_data_from_db(start_date, end_date, active_locations)
+    except Exception as e:
+        st.error(f"Error fetching data from database: {e}")
+        st.stop()
+
+if raw_df.empty:
+    if selected_locations:
+        st.warning(
+            f"No data found for {start_date.strftime('%b %d, %Y')} to {end_date.strftime('%b %d, %Y')} "
+            f"for the selected location(s)."
+        )
+    else:
+        st.info(
+            "No company data is loaded yet for the selected timeframe. "
+            "Run the sync to populate historical data, then the COMPANY TOTAL view will appear automatically."
+        )
+    st.stop()
+
+df = prepare_display_df(raw_df)
+
+if df.empty:
+    st.warning("Data was returned, but none of it matched the fields required by the dashboard.")
+    st.stop()
+
 # -----------------------------
-# Metric helpers
+# METRIC HELPERS
 # -----------------------------
 def weighted_bev_pct(df: pd.DataFrame) -> float:
     if df.empty:
@@ -252,12 +459,15 @@ def build_location_summary(df: pd.DataFrame, loc_map: dict) -> pd.DataFrame:
 
 def format_ppa_status(ppa: float):
     if ppa >= 21:
-        return "#21c55d", "#13281c"
+        return "#21c55e", "#13281c"
     if ppa >= 20:
         return "#eab308", "#2e270f"
     return "#ef4444", "#321717"
 
 
+# -----------------------------
+# TABLE STYLING
+# -----------------------------
 def style_location_summary(df: pd.DataFrame):
     def color_turn(v):
         if pd.isna(v):
@@ -350,7 +560,7 @@ def style_server_summary(df: pd.DataFrame):
 
 
 # -----------------------------
-# KPI cards
+# KPI CARDS
 # -----------------------------
 def render_kpi_cards(df: pd.DataFrame, header_label: str):
     st.markdown(f"## {header_label}")
@@ -411,7 +621,7 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
         st.markdown(
             f"""
             <div style="border:1px solid #8a6d1f; background:#2f2918; {card_style_base}">
-                <div style="color:#f0b90b; {label_style}">AVG TURN TIME (DINE IN ONLY)</div>
+                <div style="color:#f0b90b; {label_style}">TURN (DINE-IN)</div>
                 <div style="{value_style}">{avg_turn:.2f}</div>
                 <div style="{detail_style}">
                     <div>Best: <b>{best_turn}</b></div>
@@ -426,7 +636,7 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
         st.markdown(
             f"""
             <div style="border:1px solid #8d2b2b; background:#35191d; {card_style_base}">
-                <div style="color:#ff4b4b; {label_style}">AVG BEV % (DINE IN ONLY)</div>
+                <div style="color:#ff4b4b; {label_style}">BEV % (DINE-IN)</div>
                 <div style="{value_style}">{avg_bev:.2f}%</div>
                 <div style="{detail_style}">
                     <div>Top: <b>{top_bev}</b></div>
@@ -441,7 +651,7 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
         st.markdown(
             f"""
             <div style="border:1px solid {ppa_border}; background:{ppa_bg}; {card_style_base}">
-                <div style="color:{ppa_border}; {label_style}">PPA (ALL SEGMENTS)</div>
+                <div style="color:{ppa_border}; {label_style}">PPA (ALL)</div>
                 <div style="{value_style}">${ppa:.2f}</div>
                 <div style="{detail_style}">
                     <div>Top: <b>{top_ppa}</b></div>
@@ -456,7 +666,7 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
         st.markdown(
             f"""
             <div style="border:1px solid #7c3aed; background:#24163d; {card_style_base}">
-                <div style="color:#a855f7; {label_style}">ALL-GREEN (DINE IN ONLY)</div>
+                <div style="color:#a855f7; {label_style}">ALL-GREEN (DINE-IN)</div>
                 <div style="{value_style}">{all_green_count} of {total_servers}</div>
                 <div style="{detail_style}">
                     <div>Turn ≤40m & Bev ≥19%</div>
@@ -468,6 +678,155 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
         )
 
 
+# -----------------------------
+# WHATSAPP EXPORT
+# -----------------------------
+def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes:
+    server_df = build_server_summary(raw_df).copy()
+
+    avg_turn = raw_df["turn_time"].mean() if not raw_df.empty else 0.0
+    avg_bev = weighted_bev_pct(raw_df)
+    total_sales = raw_df["sales"].sum() if not raw_df.empty else 0.0
+    total_guests = raw_df["guest_count"].sum() if not raw_df.empty else 0.0
+    avg_ppa = (total_sales / total_guests) if total_guests > 0 else 0.0
+
+    all_green = server_df[
+        (server_df["turn_time"] <= 40) &
+        (server_df["beverage_pct"] >= 19)
+    ]
+    all_green_count = len(all_green)
+    total_servers = len(server_df)
+
+    best_turn = server_df.loc[server_df["turn_time"].idxmin(), "employee_name"] if total_servers else "N/A"
+    slowest_turn = server_df.loc[server_df["turn_time"].idxmax(), "employee_name"] if total_servers else "N/A"
+    top_bev = server_df.loc[server_df["beverage_pct"].idxmax(), "employee_name"] if total_servers else "N/A"
+    bottom_bev = server_df.loc[server_df["beverage_pct"].idxmin(), "employee_name"] if total_servers else "N/A"
+    top_ppa = server_df.loc[server_df["ppa"].idxmax(), "employee_name"] if total_servers else "N/A"
+    bottom_ppa = server_df.loc[server_df["ppa"].idxmin(), "employee_name"] if total_servers else "N/A"
+
+    display_df = server_df.rename(
+        columns={
+            "employee_name": "Server",
+            "turn_time": "Turn Time",
+            "beverage_pct": "Dine In Bev %",
+            "ppa": "PPA",
+        }
+    ).copy()
+
+    rows = len(display_df)
+    fig_height = max(11, 4.0 + rows * 0.38)
+
+    fig, ax = plt.subplots(figsize=(8.3, fig_height), dpi=200)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.axis("off")
+    fig.patch.set_facecolor("#f3f4f6")
+
+    ax.add_patch(Rectangle((0.015, 0.015), 0.97, 0.97, facecolor="#f3f4f6", edgecolor="#d1d5db", linewidth=1.2))
+
+    ax.add_patch(Rectangle((0.02, 0.88), 0.96, 0.1, facecolor="#2c5aa0", edgecolor="#2c5aa0"))
+    ax.text(0.04, 0.94, title, fontsize=22, fontweight="bold", color="white", va="center")
+    ax.text(0.04, 0.905, subtitle, fontsize=13, color="#dbeafe", va="center", style="italic")
+
+    card_y = 0.62
+    card_h = 0.18
+    card_w = 0.22
+    x_positions = [0.04, 0.28, 0.52, 0.76]
+
+    ppa_fill = "#6fd08c" if avg_ppa >= 21 else "#f0d766" if avg_ppa >= 20 else "#f8696b"
+
+    card_specs = [
+        ("TURN (DINE-IN)", f"{avg_turn:.2f}", f"Best: {best_turn}", f"Slow: {slowest_turn}", "#6fd08c"),
+        ("BEV % (DINE-IN)", f"{avg_bev:.2f}%", f"Top: {top_bev}", f"Bot: {bottom_bev}", "#f0d766"),
+        ("PPA (ALL)", f"${avg_ppa:.2f}", f"Top: {top_ppa}", f"Bot: {bottom_ppa}", ppa_fill),
+        ("ALL-GREEN (DINE-IN)", f"{all_green_count} of {total_servers}", "Turn ≤40m & Bev ≥19%", "", "#b160f0"),
+    ]
+
+    for i, (label, value, line1, line2, color) in enumerate(card_specs):
+        ax.add_patch(Rectangle((x_positions[i], card_y), card_w, card_h, facecolor=color, edgecolor="#cbd5e1", linewidth=1.2))
+        ax.text(x_positions[i] + 0.012, card_y + 0.15, label, fontsize=10, fontweight="bold", color="#111827", va="center")
+        ax.text(x_positions[i] + 0.012, card_y + 0.10, value, fontsize=21, fontweight="bold", color="#111827", va="center")
+        ax.text(x_positions[i] + 0.012, card_y + 0.055, line1, fontsize=9.5, color="#111827", va="center")
+        if line2:
+            ax.text(x_positions[i] + 0.012, card_y + 0.02, line2, fontsize=9.5, color="#111827", va="center")
+
+    display_df["Turn Time"] = display_df["Turn Time"].map(lambda x: f"{x:.2f}")
+    display_df["Dine In Bev %"] = display_df["Dine In Bev %"].map(lambda x: f"{x:.2f}%")
+    display_df["PPA"] = display_df["PPA"].map(lambda x: f"${x:.2f}")
+
+    table_top = 0.58
+    table_left = 0.04
+    table_width = 0.92
+    row_h = 0.033
+    header_h = 0.04
+
+    cols = ["Server", "Turn Time", "Dine In Bev %", "PPA"]
+    col_widths = [0.42, 0.18, 0.22, 0.10]
+
+    y = table_top
+    x = table_left
+    for col, w in zip(cols, col_widths):
+        ax.add_patch(Rectangle((x, y - header_h), w * table_width, header_h, facecolor="#3b73b9", edgecolor="white", linewidth=1.0))
+        ax.text(x + (w * table_width) / 2, y - header_h / 2, col, fontsize=11, fontweight="bold", color="white", ha="center", va="center")
+        x += w * table_width
+
+    def turn_fill(v):
+        v = float(v)
+        if v <= 40:
+            return "#6fd08c", "#111827"
+        if v <= 45:
+            return "#f0d766", "#111827"
+        return "#f8696b", "white"
+
+    def bev_fill(v):
+        v = float(str(v).replace("%", ""))
+        if v >= 19:
+            return "#6fd08c", "#111827"
+        if v >= 18:
+            return "#f0d766", "#111827"
+        return "#f8696b", "white"
+
+    def ppa_fill_func(v):
+        v = float(str(v).replace("$", ""))
+        if v >= 21:
+            return "#6fd08c", "#111827"
+        if v >= 20:
+            return "#f0d766", "#111827"
+        return "#f8696b", "white"
+
+    y = table_top - header_h
+    for _, row in display_df.iterrows():
+        y -= row_h
+        x = table_left
+
+        ax.add_patch(Rectangle((x, y), col_widths[0] * table_width, row_h, facecolor="#f9fafb", edgecolor="#d1d5db", linewidth=1.0))
+        ax.text(x + 0.01, y + row_h / 2, row["Server"], fontsize=10, color="#111827", ha="left", va="center")
+        x += col_widths[0] * table_width
+
+        fill, text_color = turn_fill(row["Turn Time"])
+        ax.add_patch(Rectangle((x, y), col_widths[1] * table_width, row_h, facecolor=fill, edgecolor="#d1d5db", linewidth=1.0))
+        ax.text(x + 0.01, y + row_h / 2, row["Turn Time"], fontsize=10, fontweight="bold", color=text_color, ha="left", va="center")
+        x += col_widths[1] * table_width
+
+        fill, text_color = bev_fill(row["Dine In Bev %"])
+        ax.add_patch(Rectangle((x, y), col_widths[2] * table_width, row_h, facecolor=fill, edgecolor="#d1d5db", linewidth=1.0))
+        ax.text(x + 0.01, y + row_h / 2, row["Dine In Bev %"], fontsize=10, fontweight="bold", color=text_color, ha="left", va="center")
+        x += col_widths[2] * table_width
+
+        fill, text_color = ppa_fill_func(row["PPA"])
+        ax.add_patch(Rectangle((x, y), col_widths[3] * table_width, row_h, facecolor=fill, edgecolor="#d1d5db", linewidth=1.0))
+        ax.text(x + 0.01, y + row_h / 2, row["PPA"], fontsize=10, fontweight="bold", color=text_color, ha="left", va="center")
+
+    buf = io.BytesIO()
+    plt.tight_layout()
+    plt.savefig(buf, format="png", bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+# -----------------------------
+# SYNC FRESHNESS BANNER
+# -----------------------------
 def render_sync_freshness():
     freshness = get_sync_freshness()
     if not freshness:
@@ -554,240 +913,7 @@ def render_sync_freshness():
 
 
 # -----------------------------
-# WhatsApp image export
-# -----------------------------
-def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes:
-    server_df = build_server_summary(raw_df).copy()
-
-    avg_turn = raw_df["turn_time"].mean() if not raw_df.empty else 0.0
-    avg_bev = weighted_bev_pct(raw_df)
-    total_sales = raw_df["sales"].sum() if not raw_df.empty else 0.0
-    total_guests = raw_df["guest_count"].sum() if not raw_df.empty else 0.0
-    avg_ppa = (total_sales / total_guests) if total_guests > 0 else 0.0
-
-    all_green = server_df[
-        (server_df["turn_time"] <= 40) &
-        (server_df["beverage_pct"] >= 19)
-    ]
-    all_green_count = len(all_green)
-    total_servers = len(server_df)
-
-    best_turn = server_df.loc[server_df["turn_time"].idxmin(), "employee_name"] if total_servers else "N/A"
-    slowest_turn = server_df.loc[server_df["turn_time"].idxmax(), "employee_name"] if total_servers else "N/A"
-    top_bev = server_df.loc[server_df["beverage_pct"].idxmax(), "employee_name"] if total_servers else "N/A"
-    bottom_bev = server_df.loc[server_df["beverage_pct"].idxmin(), "employee_name"] if total_servers else "N/A"
-    top_ppa = server_df.loc[server_df["ppa"].idxmax(), "employee_name"] if total_servers else "N/A"
-    bottom_ppa = server_df.loc[server_df["ppa"].idxmin(), "employee_name"] if total_servers else "N/A"
-
-    display_df = server_df.rename(
-        columns={
-            "employee_name": "Server",
-            "turn_time": "Turn Time",
-            "beverage_pct": "Dine In Bev %",
-            "ppa": "PPA",
-        }
-    ).copy()
-
-    rows = len(display_df)
-    fig_height = max(11, 4.0 + rows * 0.38)
-
-    fig, ax = plt.subplots(figsize=(8.3, fig_height), dpi=200)
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    ax.axis("off")
-    fig.patch.set_facecolor("#f3f4f6")
-
-    ax.add_patch(Rectangle((0.015, 0.015), 0.97, 0.97, facecolor="#f3f4f6", edgecolor="#d1d5db", linewidth=1.2))
-
-    ax.add_patch(Rectangle((0.02, 0.88), 0.96, 0.1, facecolor="#2c5aa0", edgecolor="#2c5aa0"))
-    ax.text(0.04, 0.94, title, fontsize=22, fontweight="bold", color="white", va="center")
-    ax.text(0.04, 0.905, subtitle, fontsize=13, color="#dbeafe", va="center", style="italic")
-
-    card_y = 0.62
-    card_h = 0.18
-    card_w = 0.22
-    x_positions = [0.04, 0.28, 0.52, 0.76]
-
-    ppa_fill = "#6fd08c" if avg_ppa >= 21 else "#f0d766" if avg_ppa >= 20 else "#f8696b"
-
-    card_specs = [
-        ("TURN", f"{avg_turn:.2f}", f"Best: {best_turn}", f"Slow: {slowest_turn}", "#6fd08c"),
-        ("BEVERAGE", f"{avg_bev:.2f}%", f"Top: {top_bev}", f"Bot: {bottom_bev}", "#f0d766"),
-        ("PPA", f"${avg_ppa:.2f}", f"Top: {top_ppa}", f"Bot: {bottom_ppa}", ppa_fill),
-        ("ALL-GREEN", f"{all_green_count} of {total_servers}", "Turn ≤40m & Bev ≥19%", "", "#b160f0"),
-    ]
-
-    for i, (label, value, line1, line2, color) in enumerate(card_specs):
-        ax.add_patch(Rectangle((x_positions[i], card_y), card_w, card_h, facecolor=color, edgecolor="#cbd5e1", linewidth=1.2))
-        ax.text(x_positions[i] + 0.012, card_y + 0.15, label, fontsize=11, fontweight="bold", color="#111827", va="center")
-        ax.text(x_positions[i] + 0.012, card_y + 0.10, value, fontsize=21, fontweight="bold", color="#111827", va="center")
-        ax.text(x_positions[i] + 0.012, card_y + 0.055, line1, fontsize=9.5, color="#111827", va="center")
-        if line2:
-            ax.text(x_positions[i] + 0.012, card_y + 0.02, line2, fontsize=9.5, color="#111827", va="center")
-
-    display_df["Turn Time"] = display_df["Turn Time"].map(lambda x: f"{x:.2f}")
-    display_df["Dine In Bev %"] = display_df["Dine In Bev %"].map(lambda x: f"{x:.2f}%")
-    display_df["PPA"] = display_df["PPA"].map(lambda x: f"${x:.2f}")
-
-    table_top = 0.58
-    table_left = 0.04
-    table_width = 0.92
-    row_h = 0.033
-    header_h = 0.04
-
-    cols = ["Server", "Turn Time", "Dine In Bev %", "PPA"]
-    col_widths = [0.42, 0.18, 0.22, 0.10]
-
-    y = table_top
-    x = table_left
-    for col, w in zip(cols, col_widths):
-        ax.add_patch(Rectangle((x, y - header_h), w * table_width, header_h, facecolor="#3b73b9", edgecolor="white", linewidth=1.0))
-        ax.text(x + (w * table_width) / 2, y - header_h / 2, col, fontsize=11, fontweight="bold", color="white", ha="center", va="center")
-        x += w * table_width
-
-    def turn_fill(v):
-        v = float(v)
-        if v <= 40:
-            return "#6fd08c", "#111827"
-        if v <= 45:
-            return "#f0d766", "#111827"
-        return "#f8696b", "white"
-
-    def bev_fill(v):
-        v = float(str(v).replace("%", ""))
-        if v >= 19:
-            return "#6fd08c", "#111827"
-        if v >= 18:
-            return "#f0d766", "#111827"
-        return "#f8696b", "white"
-
-    def ppa_fill_func(v):
-        v = float(str(v).replace("$", ""))
-        if v >= 21:
-            return "#6fd08c", "#111827"
-        if v >= 20:
-            return "#f0d766", "#111827"
-        return "#f8696b", "white"
-
-    y = table_top - header_h
-    for _, row in display_df.iterrows():
-        y -= row_h
-        x = table_left
-
-        ax.add_patch(Rectangle((x, y), col_widths[0] * table_width, row_h, facecolor="#f9fafb", edgecolor="#d1d5db", linewidth=1.0))
-        ax.text(x + 0.01, y + row_h / 2, row["Server"], fontsize=10, color="#111827", ha="left", va="center")
-        x += col_widths[0] * table_width
-
-        fill, text_color = turn_fill(row["Turn Time"])
-        ax.add_patch(Rectangle((x, y), col_widths[1] * table_width, row_h, facecolor=fill, edgecolor="#d1d5db", linewidth=1.0))
-        ax.text(x + 0.01, y + row_h / 2, row["Turn Time"], fontsize=10, fontweight="bold", color=text_color, ha="left", va="center")
-        x += col_widths[1] * table_width
-
-        fill, text_color = bev_fill(row["Dine In Bev %"])
-        ax.add_patch(Rectangle((x, y), col_widths[2] * table_width, row_h, facecolor=fill, edgecolor="#d1d5db", linewidth=1.0))
-        ax.text(x + 0.01, y + row_h / 2, row["Dine In Bev %"], fontsize=10, fontweight="bold", color=text_color, ha="left", va="center")
-        x += col_widths[2] * table_width
-
-        fill, text_color = ppa_fill_func(row["PPA"])
-        ax.add_patch(Rectangle((x, y), col_widths[3] * table_width, row_h, facecolor=fill, edgecolor="#d1d5db", linewidth=1.0))
-        ax.text(x + 0.01, y + row_h / 2, row["PPA"], fontsize=10, fontweight="bold", color=text_color, ha="left", va="center")
-
-    buf = io.BytesIO()
-    plt.tight_layout()
-    plt.savefig(buf, format="png", bbox_inches="tight", facecolor=fig.get_facecolor())
-    plt.close(fig)
-    buf.seek(0)
-    return buf.getvalue()
-
-
-# -----------------------------
-# Sidebar
-# -----------------------------
-sidebar_col1, sidebar_col2, sidebar_col3 = st.sidebar.columns([1, 1.5, 1])
-with sidebar_col2:
-    st.image("logo.png", use_container_width=True)
-
-st.sidebar.markdown(
-    "<p style='text-align: center; color: gray; font-size: 0.9em; margin-top: -10px;'>Peachtree Partners Data Analysis</p>",
-    unsafe_allow_html=True,
-)
-st.sidebar.markdown(
-    f"<p style='text-align: center; color: gray; font-size: 0.7em; margin-top: -15px;'>{APP_VERSION}</p>",
-    unsafe_allow_html=True,
-)
-st.sidebar.header("Filter Selections Below")
-
-try:
-    tz = ZoneInfo("America/New_York")
-    today = datetime.now(tz).date()
-except Exception:
-    today = datetime.now().date()
-
-yesterday = today - timedelta(days=1)
-
-date_method = st.sidebar.radio(
-    "Choose Your Timeframe",
-    ["Yesterday", "WTD", "MTD", "Custom"],
-    horizontal=True,
-)
-
-if date_method == "Yesterday":
-    start_date = end_date = yesterday
-
-elif date_method == "WTD":
-    start_date = today - timedelta(days=today.weekday())
-    end_date = yesterday
-    if start_date > end_date:
-        start_date = end_date
-
-elif date_method == "MTD":
-    start_date = today.replace(day=1)
-    end_date = yesterday
-    if start_date > end_date:
-        start_date = end_date
-
-else:
-    date_range = st.sidebar.date_input(
-        "Custom Date Range",
-        value=(yesterday - timedelta(days=6), yesterday),
-        max_value=yesterday,
-    )
-
-    if isinstance(date_range, tuple) and len(date_range) == 2:
-        start_date, end_date = date_range
-    elif isinstance(date_range, tuple) and len(date_range) == 1:
-        start_date = end_date = date_range[0]
-    else:
-        start_date = end_date = date_range
-
-    if start_date >= today or end_date >= today:
-        show_realtime_warning()
-        st.error("Real-time data is unavailable. Please adjust the Custom Date Range in the sidebar.")
-        st.stop()
-
-st.sidebar.info(
-    f"Selected: **{start_date.strftime('%b %d, %Y')}** to **{end_date.strftime('%b %d, %Y')}**"
-)
-
-with st.spinner("Loading Locations..."):
-    try:
-        loc_map = get_location_map_from_db()
-        if not loc_map:
-            st.sidebar.error("Could not load locations from Rosnet.")
-            st.stop()
-    except Exception as e:
-        st.sidebar.error(f"Could not load locations from Rosnet: {e}")
-        st.stop()
-
-selected_locations = st.sidebar.multiselect(
-    "Choose Your Location(s)",
-    options=list(loc_map.keys()),
-    format_func=lambda x: f"{x} - {loc_map.get(x, 'Unknown')}",
-    default=[],
-)
-
-# -----------------------------
-# Main
+# MAIN RENDER
 # -----------------------------
 st.title("*Almost* Live Rosnet Turn and Beverage Data 📈")
 st.warning(
@@ -795,35 +921,6 @@ st.warning(
 )
 
 render_sync_freshness()
-
-active_locations = selected_locations if selected_locations else None
-header_label = "MARKET TOTAL" if selected_locations else "COMPANY TOTAL"
-
-with st.spinner("Loading stored Rosnet data..."):
-    try:
-        raw_df = get_data_from_db(start_date, end_date, active_locations)
-    except Exception as e:
-        st.error(f"Error fetching data from database: {e}")
-        st.stop()
-
-if raw_df.empty:
-    if selected_locations:
-        st.warning(
-            f"No data found for {start_date.strftime('%b %d, %Y')} to {end_date.strftime('%b %d, %Y')} "
-            f"for the selected location(s)."
-        )
-    else:
-        st.info(
-            "No company data is loaded yet for the selected timeframe. "
-            "Run the sync to populate historical data, then the COMPANY TOTAL view will appear automatically."
-        )
-    st.stop()
-
-df = prepare_display_df(raw_df)
-
-if df.empty:
-    st.warning("Data was returned, but none of it matched the fields required by the dashboard.")
-    st.stop()
 
 tab1, tab2, tab3, tab4 = st.tabs([
     "📊 Overview",
@@ -920,7 +1017,7 @@ with tab4:
         for text, status in items:
             extra = ""
             if status == "LIVE":
-                extra = f'<div style="color:#22c55e; font-size:12px; margin-top:2px;">Live as of {APP_VERSION}</div>'
+                extra = f'<div style="color:#22c55e; font-size:12px; margin-top:2px;">Live as of v1.7.0</div>'
             rows += f"<li style='margin-bottom:10px;'>{text} {status_tag(status)}{extra}</li>"
 
         return f"""
