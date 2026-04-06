@@ -837,7 +837,7 @@ if not last_sync:
         st.sidebar.warning("No sync data yet")
         return
 
-    try:
+try:
         local_tz = ZoneInfo("America/Chicago")
         last_sync_local = last_sync.astimezone(local_tz)
     except Exception:
