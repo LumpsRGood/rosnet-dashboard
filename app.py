@@ -198,11 +198,11 @@ def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
 def weighted_bev_pct(df: pd.DataFrame) -> float:
     if df.empty:
         return 0.0
+
     total_sales = df["sales"].sum()
-    if total_sales <= 0:
-        return 0.0
-    bev_dollars = (df["sales"] * (df["beverage_pct"] / 100.0)).sum()
-    return (bev_dollars / total_sales) * 100.0
+    total_bev_sales = df["beverage_sales"].sum()
+
+    return (total_bev_sales / total_sales * 100.0) if total_sales > 0 else 0.0
 
 
 def aggregate_store_day_ppa(df: pd.DataFrame) -> float:
@@ -230,15 +230,14 @@ def build_server_summary(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     bev_source = (
-        df.assign(beverage_dollars=df["sales"] * (df["beverage_pct"] / 100.0))
-        .groupby("employee_name", dropna=False)
-        .agg(beverage_dollars=("beverage_dollars", "sum"))
+        df.groupby("employee_name", dropna=False)
+        .agg(beverage_sales=("beverage_sales", "sum"))
         .reset_index()
     )
 
     grouped = grouped.merge(bev_source, on="employee_name", how="left")
     grouped["beverage_pct"] = grouped.apply(
-        lambda r: (r["beverage_dollars"] / r["sales"] * 100.0) if r["sales"] > 0 else 0.0,
+        lambda r: (r["beverage_sales"] / r["sales"] * 100.0) if r["sales"] > 0 else 0.0,
         axis=1,
     )
 
@@ -260,9 +259,8 @@ def build_location_summary(df: pd.DataFrame, loc_map: dict) -> pd.DataFrame:
     )
 
     bev_source = (
-        df.assign(beverage_dollars=df["sales"] * (df["beverage_pct"] / 100.0))
-        .groupby("store_number", dropna=False)
-        .agg(beverage_dollars=("beverage_dollars", "sum"))
+        df.groupby("store_number", dropna=False)
+        .agg(beverage_sales=("beverage_sales", "sum"))
         .reset_index()
     )
 
@@ -279,7 +277,7 @@ def build_location_summary(df: pd.DataFrame, loc_map: dict) -> pd.DataFrame:
     grouped = grouped.merge(ppa_source, on="store_number", how="left")
 
     grouped["beverage_pct"] = grouped.apply(
-        lambda r: (r["beverage_dollars"] / r["sales"] * 100.0) if r["sales"] > 0 else 0.0,
+        lambda r: (r["beverage_sales"] / r["sales"] * 100.0) if r["sales"] > 0 else 0.0,
         axis=1,
     )
     grouped["Location"] = grouped["store_number"].apply(
