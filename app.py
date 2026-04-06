@@ -1,21 +1,25 @@
-import streamlit as st
-import pandas as pd
-import psycopg2
+import io
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-# -----------------------------
-# CONFIG
-# -----------------------------
-APP_VERSION = "v1.8.1"
+import matplotlib.pyplot as plt
+import pandas as pd
+import psycopg2
+import streamlit as st
+from matplotlib.patches import Rectangle
+
+APP_VERSION = "v1.8.2"
 
 st.set_page_config(
     page_title="Peachtree Performance Dashboard",
-    layout="wide"
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
+
 # -----------------------------
-# DB CONNECTION
+# DB
 # -----------------------------
 def get_db_connection():
     return psycopg2.connect(
@@ -26,9 +30,7 @@ def get_db_connection():
         password=st.secrets["database"]["password"],
     )
 
-# -----------------------------
-# LOCATION MAP (NO API)
-# -----------------------------
+
 @st.cache_data(ttl=300)
 def get_location_map_from_db():
     conn = get_db_connection()
@@ -54,16 +56,14 @@ def get_location_map_from_db():
         for _, row in df.iterrows()
     }
 
-# -----------------------------
-# SYNC STATUS (FOR FRESHNESS)
-# -----------------------------
+
 @st.cache_data(ttl=120)
 def get_sync_status():
     conn = get_db_connection()
     try:
         df = pd.read_sql(
             """
-            SELECT 
+            SELECT
                 COUNT(*) AS total_stores,
                 COUNT(last_synced_date) AS synced_stores,
                 MAX(last_attempted_at) AS last_attempted_at
@@ -79,13 +79,42 @@ def get_sync_status():
 
     row = df.iloc[0]
     return (
-        int(row["total_stores"]),
-        int(row["synced_stores"]),
+        int(row["total_stores"] or 0),
+        int(row["synced_stores"] or 0),
         row["last_attempted_at"],
     )
 
+
+@st.cache_data(ttl=300)
+def get_data_from_db(start_date, end_date, locations=None):
+    conn = get_db_connection()
+    try:
+        if locations:
+            locations = [int(x) for x in locations]
+            query = """
+                SELECT *
+                FROM employee_daily_metrics
+                WHERE store_number = ANY(%s::bigint[])
+                  AND business_date BETWEEN %s AND %s
+                ORDER BY business_date, store_number, employee_name
+            """
+            df = pd.read_sql(query, conn, params=(locations, start_date, end_date))
+        else:
+            query = """
+                SELECT *
+                FROM employee_daily_metrics
+                WHERE business_date BETWEEN %s AND %s
+                ORDER BY business_date, store_number, employee_name
+            """
+            df = pd.read_sql(query, conn, params=(start_date, end_date))
+    finally:
+        conn.close()
+
+    return df
+
+
 # -----------------------------
-# SIDEBAR FRESHNESS DISPLAY
+# SIDEBAR FRESHNESS
 # -----------------------------
 def render_freshness_sidebar():
     total, synced, last_sync = get_sync_status()
@@ -99,12 +128,12 @@ def render_freshness_sidebar():
 
     try:
         local_tz = ZoneInfo("America/Chicago")
-        last_sync_local = last_sync.astimezone(local_tz)
+        last_sync_local = pd.to_datetime(last_sync, utc=True).tz_convert(local_tz)
     except Exception:
-        last_sync_local = last_sync
+        last_sync_local = pd.to_datetime(last_sync)
 
-    now = datetime.now(last_sync_local.tzinfo)
-    diff_minutes = (now - last_sync_local).total_seconds() / 60
+    now = datetime.now(last_sync_local.tzinfo) if getattr(last_sync_local, "tzinfo", None) else datetime.now()
+    diff_minutes = (now - last_sync_local.to_pydatetime()).total_seconds() / 60
 
     if diff_minutes < 30:
         color = "#22c55e"
@@ -132,7 +161,7 @@ def render_freshness_sidebar():
 
             <div style="font-size:12px; margin-bottom:6px;">
                 Last Sync:<br>
-                {last_sync_local.strftime('%I:%M %p')}
+                {last_sync_local.strftime('%I:%M %p %Z')}
             </div>
 
             <div style="font-size:12px;">
@@ -157,147 +186,10 @@ def render_freshness_sidebar():
         unsafe_allow_html=True,
     )
 
-# -----------------------------
-# SIDEBAR / FILTERS
-# -----------------------------
-sidebar_col1, sidebar_col2, sidebar_col3 = st.sidebar.columns([1, 1.5, 1])
-with sidebar_col2:
-    try:
-        st.image("logo.png", use_container_width=True)
-    except Exception:
-        pass
-
-st.sidebar.markdown(
-    "<p style='text-align: center; color: gray; font-size: 0.9em; margin-top: -10px;'>Peachtree Partners Data Analysis</p>",
-    unsafe_allow_html=True,
-)
-st.sidebar.markdown(
-    f"<p style='text-align: center; color: gray; font-size: 0.7em; margin-top: -15px;'>{APP_VERSION}</p>",
-    unsafe_allow_html=True,
-)
-
-st.sidebar.header("Filter Selections Below")
 
 # -----------------------------
-# DATE LOGIC
+# DATA PREP
 # -----------------------------
-try:
-    tz = ZoneInfo("America/New_York")
-    today = datetime.now(tz).date()
-except Exception:
-    today = datetime.now().date()
-
-yesterday = today - timedelta(days=1)
-
-date_method = st.sidebar.radio(
-    "Choose Your Timeframe",
-    ["Yesterday", "WTD", "MTD", "Custom"],
-    horizontal=True,
-)
-
-if date_method == "Yesterday":
-    start_date = end_date = yesterday
-
-elif date_method == "WTD":
-    start_date = today - timedelta(days=today.weekday())
-    end_date = yesterday
-    if start_date > end_date:
-        start_date = end_date
-
-elif date_method == "MTD":
-    start_date = today.replace(day=1)
-    end_date = yesterday
-    if start_date > end_date:
-        start_date = end_date
-
-else:
-    date_range = st.sidebar.date_input(
-        "Custom Date Range",
-        value=(yesterday - timedelta(days=6), yesterday),
-        max_value=yesterday,
-    )
-
-    if isinstance(date_range, tuple) and len(date_range) == 2:
-        start_date, end_date = date_range
-    elif isinstance(date_range, tuple) and len(date_range) == 1:
-        start_date = end_date = date_range[0]
-    else:
-        start_date = end_date = date_range
-
-    if start_date >= today or end_date >= today:
-        st.sidebar.error("Real-time data is unavailable. Please adjust the Custom Date Range.")
-        st.stop()
-
-st.sidebar.info(
-    f"Selected: **{start_date.strftime('%b %d, %Y')}** to **{end_date.strftime('%b %d, %Y')}**"
-)
-
-# -----------------------------
-# LOCATION LOADING (DB ONLY)
-# -----------------------------
-with st.spinner("Loading Locations..."):
-    try:
-        loc_map = get_location_map_from_db()
-        if not loc_map:
-            st.sidebar.error("Could not load locations from stored data yet.")
-            st.stop()
-    except Exception as e:
-        st.sidebar.error(f"Could not load locations from database: {e}")
-        st.stop()
-
-selected_locations = st.sidebar.multiselect(
-    "Choose Your Location(s)",
-    options=list(loc_map.keys()),
-    format_func=lambda x: f"{x} - {loc_map.get(x, 'Unknown')}",
-    default=[],
-)
-
-# -----------------------------
-# DATA FRESHNESS / PROGRESS
-# -----------------------------
-render_freshness_sidebar()
-
-# -----------------------------
-# MAIN HEADER
-# -----------------------------
-st.title("*Almost* Live Rosnet Turn and Beverage Data 📈")
-st.warning(
-    "🚧 **Under Development:** This dashboard is currently in active testing. Errors may occasionally occur. Please contact **Chad** with any issues, feedback, or UI suggestions."
-)
-
-active_locations = selected_locations if selected_locations else None
-header_label = "MARKET TOTAL" if selected_locations else "COMPANY TOTAL"
-
-# -----------------------------
-# DATA LOAD
-# -----------------------------
-@st.cache_data(ttl=300)
-def get_data_from_db(start_date, end_date, locations=None):
-    conn = get_db_connection()
-    try:
-        if locations:
-            locations = [int(x) for x in locations]
-            query = """
-                SELECT *
-                FROM employee_daily_metrics
-                WHERE store_number = ANY(%s::bigint[])
-                  AND business_date BETWEEN %s AND %s
-                ORDER BY business_date, store_number, employee_name
-            """
-            df = pd.read_sql(query, conn, params=(locations, start_date, end_date))
-        else:
-            query = """
-                SELECT *
-                FROM employee_daily_metrics
-                WHERE business_date BETWEEN %s AND %s
-                ORDER BY business_date, store_number, employee_name
-            """
-            df = pd.read_sql(query, conn, params=(start_date, end_date))
-    finally:
-        conn.close()
-    return df
-
-
 def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df.copy()
@@ -338,35 +230,6 @@ def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-with st.spinner("Loading stored Rosnet data..."):
-    try:
-        raw_df = get_data_from_db(start_date, end_date, active_locations)
-    except Exception as e:
-        st.error(f"Error fetching data from database: {e}")
-        st.stop()
-
-if raw_df.empty:
-    if selected_locations:
-        st.warning(
-            f"No data found for {start_date.strftime('%b %d, %Y')} to {end_date.strftime('%b %d, %Y')} "
-            f"for the selected location(s)."
-        )
-    else:
-        st.info(
-            "No company data is loaded yet for the selected timeframe. "
-            "Run the sync to populate historical data, then the COMPANY TOTAL view will appear automatically."
-        )
-    st.stop()
-
-df = prepare_display_df(raw_df)
-
-if df.empty:
-    st.warning("Data was returned, but none of it matched the fields required by the dashboard.")
-    st.stop()
-
-# -----------------------------
-# METRIC HELPERS
-# -----------------------------
 def weighted_bev_pct(df: pd.DataFrame) -> float:
     if df.empty:
         return 0.0
@@ -375,6 +238,16 @@ def weighted_bev_pct(df: pd.DataFrame) -> float:
         return 0.0
     bev_dollars = (df["sales"] * (df["beverage_pct"] / 100.0)).sum()
     return (bev_dollars / total_sales) * 100.0
+
+
+def aggregate_store_day_ppa(df: pd.DataFrame) -> float:
+    if df.empty:
+        return 0.0
+    store_day = (
+        df.groupby(["store_number", "business_date"], as_index=False)
+        .agg(ppa=("ppa", "first"))
+    )
+    return float(store_day["ppa"].mean()) if not store_day.empty else 0.0
 
 
 def build_server_summary(df: pd.DataFrame) -> pd.DataFrame:
@@ -386,8 +259,7 @@ def build_server_summary(df: pd.DataFrame) -> pd.DataFrame:
         .agg(
             turn_time=("turn_time", "mean"),
             sales=("sales", "sum"),
-            check_count=("check_count", "sum"),
-            guest_count=("guest_count", "sum"),
+            ppa=("ppa", "mean"),
         )
         .reset_index()
     )
@@ -404,10 +276,6 @@ def build_server_summary(df: pd.DataFrame) -> pd.DataFrame:
         lambda r: (r["beverage_dollars"] / r["sales"] * 100.0) if r["sales"] > 0 else 0.0,
         axis=1,
     )
-    grouped["ppa"] = grouped.apply(
-        lambda r: (r["sales"] / r["guest_count"]) if r["guest_count"] > 0 else 0.0,
-        axis=1,
-    )
 
     grouped = grouped[["employee_name", "turn_time", "beverage_pct", "ppa"]]
     return grouped.sort_values("turn_time", ascending=True).reset_index(drop=True)
@@ -422,8 +290,6 @@ def build_location_summary(df: pd.DataFrame, loc_map: dict) -> pd.DataFrame:
         .agg(
             turn_time=("turn_time", "mean"),
             sales=("sales", "sum"),
-            check_count=("check_count", "sum"),
-            guest_count=("guest_count", "sum"),
         )
         .reset_index()
     )
@@ -435,16 +301,25 @@ def build_location_summary(df: pd.DataFrame, loc_map: dict) -> pd.DataFrame:
         .reset_index()
     )
 
+    ppa_source = (
+        df.groupby(["store_number", "business_date"], dropna=False)
+        .agg(ppa=("ppa", "first"))
+        .reset_index()
+        .groupby("store_number", dropna=False)
+        .agg(ppa=("ppa", "mean"))
+        .reset_index()
+    )
+
     grouped = grouped.merge(bev_source, on="store_number", how="left")
+    grouped = grouped.merge(ppa_source, on="store_number", how="left")
+
     grouped["beverage_pct"] = grouped.apply(
         lambda r: (r["beverage_dollars"] / r["sales"] * 100.0) if r["sales"] > 0 else 0.0,
         axis=1,
     )
-    grouped["ppa"] = grouped.apply(
-        lambda r: (r["sales"] / r["guest_count"]) if r["guest_count"] > 0 else 0.0,
-        axis=1,
+    grouped["Location"] = grouped["store_number"].apply(
+        lambda x: f"{x} - {loc_map.get(int(x), 'Unknown')}"
     )
-    grouped["Location"] = grouped["store_number"].apply(lambda x: f"{x} - {loc_map.get(int(x), 'Unknown')}")
 
     out = grouped.rename(
         columns={
@@ -457,6 +332,9 @@ def build_location_summary(df: pd.DataFrame, loc_map: dict) -> pd.DataFrame:
     return out.sort_values("PPA", ascending=False).reset_index(drop=True)
 
 
+# -----------------------------
+# STYLING
+# -----------------------------
 def format_ppa_status(ppa: float):
     if ppa >= 21:
         return "#21c55e", "#13281c"
@@ -465,9 +343,6 @@ def format_ppa_status(ppa: float):
     return "#ef4444", "#321717"
 
 
-# -----------------------------
-# TABLE STYLING
-# -----------------------------
 def style_location_summary(df: pd.DataFrame):
     def color_turn(v):
         if pd.isna(v):
@@ -567,9 +442,7 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
 
     avg_turn = df["turn_time"].mean() if not df.empty else 0.0
     avg_bev = weighted_bev_pct(df)
-    total_sales = df["sales"].sum() if not df.empty else 0.0
-    total_guests = df["guest_count"].sum() if not df.empty else 0.0
-    ppa = (total_sales / total_guests) if total_guests > 0 else 0.0
+    ppa = aggregate_store_day_ppa(df)
 
     server_summary = build_server_summary(df)
     total_servers = len(server_summary)
@@ -612,7 +485,6 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
         justify-content:space-between;
         overflow:hidden;
     """
-
     label_style = "font-size:14px; font-weight:700; letter-spacing:1px;"
     value_style = "font-size:46px; font-weight:800; color:white; line-height:1.0; margin-top:10px;"
     detail_style = "font-size:16px; color:white; line-height:1.35; min-height:58px;"
@@ -686,9 +558,7 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
 
     avg_turn = raw_df["turn_time"].mean() if not raw_df.empty else 0.0
     avg_bev = weighted_bev_pct(raw_df)
-    total_sales = raw_df["sales"].sum() if not raw_df.empty else 0.0
-    total_guests = raw_df["guest_count"].sum() if not raw_df.empty else 0.0
-    avg_ppa = (total_sales / total_guests) if total_guests > 0 else 0.0
+    avg_ppa = aggregate_store_day_ppa(raw_df)
 
     all_green = server_df[
         (server_df["turn_time"] <= 40) &
@@ -824,83 +694,135 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
     buf.seek(0)
     return buf.getvalue()
 
-# -----------------------------
-# SYNC FRESHNESS BANNER
-# -----------------------------
-def render_sync_freshness():
-    total, synced, last_sync = get_sync_status()
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 📡 Data Freshness")
+# -----------------------------
+# SIDEBAR
+# -----------------------------
+sidebar_col1, sidebar_col2, sidebar_col3 = st.sidebar.columns([1, 1.5, 1])
+with sidebar_col2:
+    try:
+        st.image("logo.png", use_container_width=True)
+    except Exception:
+        pass
 
-if not last_sync:
-        st.sidebar.warning("No sync data yet")
-        return
+st.sidebar.markdown(
+    "<p style='text-align: center; color: gray; font-size: 0.9em; margin-top: -10px;'>Peachtree Partners Data Analysis</p>",
+    unsafe_allow_html=True,
+)
+st.sidebar.markdown(
+    f"<p style='text-align: center; color: gray; font-size: 0.7em; margin-top: -15px;'>{APP_VERSION}</p>",
+    unsafe_allow_html=True,
+)
+st.sidebar.header("Filter Selections Below")
 
 try:
-        local_tz = ZoneInfo("America/Chicago")
-        last_sync_local = last_sync.astimezone(local_tz)
-    except Exception:
-        last_sync_local = last_sync
+    tz = ZoneInfo("America/New_York")
+    today = datetime.now(tz).date()
+except Exception:
+    today = datetime.now().date()
 
-    now = datetime.now(last_sync_local.tzinfo)
-    diff_minutes = (now - last_sync_local).total_seconds() / 60
+yesterday = today - timedelta(days=1)
 
-    if diff_minutes < 30:
-        color = "#22c55e"
-        label = "Fresh"
-    elif diff_minutes < 120:
-        color = "#facc15"
-        label = "Delayed"
-    else:
-        color = "#ef4444"
-        label = "Stale"
+date_method = st.sidebar.radio(
+    "Choose Your Timeframe",
+    ["Yesterday", "WTD", "MTD", "Custom"],
+    horizontal=True,
+)
 
-    percent = (synced / total * 100) if total > 0 else 0
-
-    st.sidebar.markdown(
-        f"""
-        <div style="
-            padding:12px;
-            border-radius:12px;
-            background:{color}20;
-            border:1px solid {color};
-        ">
-            <div style="font-weight:700; color:{color}; margin-bottom:6px;">
-                {label}
-            </div>
-
-            <div style="font-size:12px; margin-bottom:6px;">
-                Last Sync:<br>
-                {last_sync_local.strftime('%I:%M %p')}
-            </div>
-
-            <div style="font-size:12px;">
-                Progress: {synced} / {total} stores
-            </div>
-
-            <div style="
-                margin-top:6px;
-                height:6px;
-                background:#222;
-                border-radius:6px;
-                overflow:hidden;
-            ">
-                <div style="
-                    width:{percent}%;
-                    height:100%;
-                    background:{color};
-                "></div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+if date_method == "Yesterday":
+    start_date = end_date = yesterday
+elif date_method == "WTD":
+    start_date = today - timedelta(days=today.weekday())
+    end_date = yesterday
+    if start_date > end_date:
+        start_date = end_date
+elif date_method == "MTD":
+    start_date = today.replace(day=1)
+    end_date = yesterday
+    if start_date > end_date:
+        start_date = end_date
+else:
+    date_range = st.sidebar.date_input(
+        "Custom Date Range",
+        value=(yesterday - timedelta(days=6), yesterday),
+        max_value=yesterday,
     )
-# -----------------------------
-# MAIN RENDER
-# -----------------------------
-render_sync_freshness()
 
+    if isinstance(date_range, tuple) and len(date_range) == 2:
+        start_date, end_date = date_range
+    elif isinstance(date_range, tuple) and len(date_range) == 1:
+        start_date = end_date = date_range[0]
+    else:
+        start_date = end_date = date_range
+
+    if start_date >= today or end_date >= today:
+        st.sidebar.error("Real-time data is unavailable. Please adjust the Custom Date Range.")
+        st.stop()
+
+st.sidebar.info(
+    f"Selected: **{start_date.strftime('%b %d, %Y')}** to **{end_date.strftime('%b %d, %Y')}**"
+)
+
+with st.spinner("Loading Locations..."):
+    try:
+        loc_map = get_location_map_from_db()
+    except Exception as e:
+        st.sidebar.error(f"Could not load locations from database: {e}")
+        st.stop()
+
+location_options = list(loc_map.keys()) if loc_map else []
+
+selected_locations = st.sidebar.multiselect(
+    "Choose Your Location(s)",
+    options=location_options,
+    format_func=lambda x: f"{x} - {loc_map.get(x, 'Unknown')}",
+    default=[],
+)
+
+render_freshness_sidebar()
+
+
+# -----------------------------
+# MAIN DATA LOAD
+# -----------------------------
+st.title("*Almost* Live Rosnet Turn and Beverage Data 📈")
+st.warning(
+    "🚧 **Under Development:** This dashboard is currently in active testing. Errors may occasionally occur. Please contact **Chad** with any issues, feedback, or UI suggestions."
+)
+
+active_locations = selected_locations if selected_locations else None
+header_label = "MARKET TOTAL" if selected_locations else "COMPANY TOTAL"
+
+with st.spinner("Loading stored Rosnet data..."):
+    try:
+        raw_df = get_data_from_db(start_date, end_date, active_locations)
+    except Exception as e:
+        st.error(f"Error fetching data from database: {e}")
+        st.stop()
+
+if raw_df.empty:
+    if selected_locations:
+        st.warning(
+            f"No data found for {start_date.strftime('%b %d, %Y')} to {end_date.strftime('%b %d, %Y')} "
+            f"for the selected location(s)."
+        )
+    else:
+        st.info(
+            "No company data is loaded yet for the selected timeframe. "
+            "Run the sync to populate historical data, then the COMPANY TOTAL view will appear automatically."
+        )
+    st.stop()
+
+df = prepare_display_df(raw_df)
+
+if df.empty:
+    st.warning("Data was returned, but none of it matched the fields required by the dashboard.")
+    st.stop()
+
+
+# -----------------------------
+# TABS
+# -----------------------------
 tab1, tab2, tab3, tab4 = st.tabs([
     "📊 Overview",
     "👨‍🍳 Server Performance",
@@ -993,10 +915,10 @@ with tab4:
 
     def roadmap_card(title, items, color):
         rows = ""
-        for text, status in items:
+        for text, status, live_note in items:
             extra = ""
-            if status == "LIVE":
-                extra = f'<div style="color:#22c55e; font-size:12px; margin-top:2px;">Live as of v1.7.0</div>'
+            if status == "LIVE" and live_note:
+                extra = f'<div style="color:#22c55e; font-size:12px; margin-top:2px;">{live_note}</div>'
             rows += f"<li style='margin-bottom:10px;'>{text} {status_tag(status)}{extra}</li>"
 
         return f"""
@@ -1023,10 +945,10 @@ with tab4:
             roadmap_card(
                 "🔥 Next Up",
                 [
-                    ("+/- vs Previous Period", "IN PROGRESS"),
-                    ("Trend Indicators (↑ ↓)", "PLANNED"),
-                    ("Top & Bottom Movers", "PLANNED"),
-                    ("Enhanced WhatsApp Exports", "IN PROGRESS"),
+                    ("+/- vs Previous Period", "IN PROGRESS", ""),
+                    ("Trend Indicators (↑ ↓)", "PLANNED", ""),
+                    ("Top & Bottom Movers", "PLANNED", ""),
+                    ("Enhanced WhatsApp Exports", "IN PROGRESS", ""),
                 ],
                 "#22c55e",
             ),
@@ -1038,10 +960,10 @@ with tab4:
             roadmap_card(
                 "🧠 Smarter Insights",
                 [
-                    ("Coaching Callouts", "PLANNED"),
-                    ("Highlight Underperformers", "PLANNED"),
-                    ("Server Search & Filters", "PLANNED"),
-                    ("Minimum Check Threshold", "PLANNED"),
+                    ("Coaching Callouts", "PLANNED", ""),
+                    ("Highlight Underperformers", "PLANNED", ""),
+                    ("Server Search & Filters", "PLANNED", ""),
+                    ("Minimum Check Threshold", "PLANNED", ""),
                 ],
                 "#f59e0b",
             ),
@@ -1057,10 +979,10 @@ with tab4:
             roadmap_card(
                 "📈 Data Evolution",
                 [
-                    ("WTD / MTD Comparisons", "PLANNED"),
-                    ("Store Rank Movement", "PLANNED"),
-                    ("Historical Trends", "PLANNED"),
-                    ("LY Comparisons", "PLANNED"),
+                    ("WTD / MTD Comparisons", "PLANNED", ""),
+                    ("Store Rank Movement", "PLANNED", ""),
+                    ("Historical Trends", "PLANNED", ""),
+                    ("LY Comparisons", "PLANNED", ""),
                 ],
                 "#3b82f6",
             ),
@@ -1072,10 +994,10 @@ with tab4:
             roadmap_card(
                 "⚙️ System & Backend",
                 [
-                    ("Sync Freshness Indicator", "LIVE"),
-                    ("Store Sync Coverage", "PLANNED"),
-                    ("Admin Diagnostics View", "PLANNED"),
-                    ("Data Quality Safeguards", "PLANNED"),
+                    ("Sync Freshness Indicator", "LIVE", "Live as of v1.7.0"),
+                    ("Store Sync Coverage", "PLANNED", ""),
+                    ("Admin Diagnostics View", "PLANNED", ""),
+                    ("Data Quality Safeguards", "PLANNED", ""),
                 ],
                 "#a855f7",
             ),
