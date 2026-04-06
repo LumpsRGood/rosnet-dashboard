@@ -232,23 +232,6 @@ def transform_checks(df, store_id, day_str):
     if df.empty:
         return pd.DataFrame()
 
-    # Keep a full-segment copy for PPA
-    df_all = df.copy()
-
-    required_all = {"netSales", "guestCount"}
-    missing_all = required_all - set(df_all.columns)
-    if missing_all:
-        print(f"    skipped, missing all-segment fields: {sorted(missing_all)}")
-        return pd.DataFrame()
-
-    df_all["netSales"] = pd.to_numeric(df_all["netSales"], errors="coerce").fillna(0)
-    df_all["guestCount"] = pd.to_numeric(df_all["guestCount"], errors="coerce").fillna(0)
-
-    total_sales_all = df_all["netSales"].sum()
-    total_guests_all = df_all["guestCount"].sum()
-    ppa_all = (total_sales_all / total_guests_all) if total_guests_all > 0 else 0.0
-
-    # Now filter to dine-in for turn + beverage + server rows
     df = filter_to_true_dine_in(df)
     if df.empty:
         return pd.DataFrame()
@@ -260,10 +243,11 @@ def transform_checks(df, store_id, day_str):
         "beverageSales",
         "openTime",
         "closeTime",
+        "guestCount",
     }
     missing = required - set(df.columns)
     if missing:
-        print(f"    skipped, missing dine-in fields: {sorted(missing)}")
+        print(f"    skipped, missing columns: {sorted(missing)}")
         return pd.DataFrame()
 
     df = df.dropna(
@@ -272,26 +256,29 @@ def transform_checks(df, store_id, day_str):
             "checkNumber",
             "netSales",
             "beverageSales",
-            "openTime",
-            "closeTime",
+            "guestCount",
         ]
     ).copy()
 
     if df.empty:
         return pd.DataFrame()
 
-    df["netSales"] = pd.to_numeric(df["netSales"], errors="coerce").fillna(0)
-    df["beverageSales"] = pd.to_numeric(df["beverageSales"], errors="coerce").fillna(0)
-
-    df["openTime"] = pd.to_datetime(df["openTime"], format="%H:%M:%S", errors="coerce")
-    df["closeTime"] = pd.to_datetime(df["closeTime"], format="%H:%M:%S", errors="coerce")
-
-    df["turn_time"] = (df["closeTime"] - df["openTime"]).dt.total_seconds() / 60
-    df.loc[df["turn_time"] < 0, "turn_time"] += 24 * 60
-    df = df[df["turn_time"] > 0].copy()
-
+    df["guestCount"] = pd.to_numeric(df["guestCount"], errors="coerce").fillna(0)
+    df = df[df["guestCount"] > 0].copy()
     if df.empty:
         return pd.DataFrame()
+
+    if "openTime" in df.columns and "closeTime" in df.columns:
+        df["openTimeObj"] = pd.to_datetime(df["openTime"], format="%H:%M:%S", errors="coerce")
+        df["closeTimeObj"] = pd.to_datetime(df["closeTime"], format="%H:%M:%S", errors="coerce")
+        
+        df["turn_time"] = (df["closeTimeObj"] - df["openTimeObj"]).dt.total_seconds() / 60
+        df.loc[df["turn_time"] < 0, "turn_time"] += 24 * 60
+        
+        import numpy as np
+        df["turn_time"] = df["turn_time"].apply(lambda x: x if pd.notna(x) and x > 0 else np.nan)
+    else:
+        df["turn_time"] = float('nan')
 
     grouped = (
         df.groupby("serverName", dropna=False)
@@ -300,25 +287,26 @@ def transform_checks(df, store_id, day_str):
             beverage_sales=("beverageSales", "sum"),
             turn_time=("turn_time", "mean"),
             check_count=("checkNumber", "count"),
+            guest_count=("guestCount", "sum"),
         )
         .reset_index()
     )
 
+    grouped = grouped[grouped["guest_count"] > 0].copy()
     if grouped.empty:
         return pd.DataFrame()
 
-    # PPA is store/day level from ALL segments
-    grouped["ppa"] = ppa_all
-
-    # Beverage % stays dine-in only
-    grouped["beverage_pct"] = grouped.apply(
-        lambda r: (r["beverage_sales"] / r["sales"] * 100.0) if r["sales"] > 0 else 0.0,
+    grouped["ppa"] = grouped.apply(
+        lambda r: (r["sales"] / r["guest_count"]) if r["guest_count"] > 0 else 0.0,
         axis=1,
     )
 
-    # Keep guest_count so app can still use it if needed.
-    # Since PPA is all-segment store/day PPA, we store all-segment guests on each row.
-    grouped["guest_count"] = total_guests_all
+    grouped["beverage_pct"] = (
+        (grouped["beverage_sales"] / grouped["sales"])
+        .replace([pd.NA, pd.NaT], 0)
+        .fillna(0)
+        * 100
+    )
 
     grouped["employee_id"] = (
         grouped["serverName"]
