@@ -833,7 +833,7 @@ def render_sync_freshness():
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 📡 Data Freshness")
 
-    if not last_sync:
+if not last_sync:
         st.sidebar.warning("No sync data yet")
         return
 
