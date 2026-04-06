@@ -19,7 +19,6 @@ class RateLimitExceeded(Exception):
         self.retry_after = retry_after
         super().__init__(f"Rate limited by Rosnet API. Retry after {retry_after} seconds.")
 
-
 # Try to get credentials from environment
 API_USER = os.getenv("ROSNET_API_USER")
 API_KEY = os.getenv("ROSNET_API_KEY")
@@ -242,10 +241,27 @@ def get_checks(start_date, end_date, location_id, emp_map=None, bev_cat_ids=None
                 else:
                     server = f"Emp {emp_id}"
             
-            # 3. Determine Order Type (Heuristic based on Table Name)
-            # Table 0 usually implies Takeout/Delivery, others imply Eat In
-            tbl = str(c.get('TableName', '0')).strip()
-            order_type = "Eat In" if tbl != '0' and tbl != '' else "Delivery"
+            # 3. Determine Order Type
+            # Attempt to pull the direct Rosnet property first
+            native_type = str(c.get('OrderType', c.get('OrderTypeName', ''))).strip()
+            
+            if native_type:
+                order_type = native_type
+            else:
+                # Smarter heuristic: catch Table 0 and named To-Go tickets
+                tbl = str(c.get('TableName', '0')).strip().lower()
+                
+                is_togo = (
+                    tbl == '0' or 
+                    tbl == '' or 
+                    'togo' in tbl or 
+                    'takeout' in tbl or 
+                    'to go' in tbl or 
+                    'pickup' in tbl or
+                    'uber' in tbl or
+                    'doordash' in tbl
+                )
+                order_type = "Delivery" if is_togo else "Eat In"
             
             # 4. Format Times to HH:MM:SS
             o_time = c.get('OpenTime', '')
