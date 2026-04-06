@@ -90,17 +90,17 @@ def get_sync_status():
 def render_freshness_sidebar():
     total, synced, last_sync = get_sync_status()
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 📡 Data Freshness")
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 📡 Data Freshness")
 
-if not last_sync:
+    if not last_sync:
         st.sidebar.warning("No sync data yet")
         return
 
     try:
         local_tz = ZoneInfo("America/Chicago")
         last_sync_local = last_sync.astimezone(local_tz)
-    except:
+    except Exception:
         last_sync_local = last_sync
 
     now = datetime.now(last_sync_local.tzinfo)
