@@ -788,11 +788,12 @@ if df.empty:
 # -----------------------------
 # TABS
 # -----------------------------
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📊 Overview",
     "👨‍🍳 Server Performance",
     "🧾 Dataset",
-    "🚀 Coming Attractions"
+    "🚀 Coming Attractions",
+    "🆘 Known Gremlins"
 ])
 
 with tab1:
@@ -972,6 +973,171 @@ with tab4:
     st.markdown("---")
     st.markdown(
         "<center><i>This dashboard is evolving fast. Every update is built to drive One More Visit.</i></center>",
+        unsafe_allow_html=True,
+    )
+
+with tab5:
+    st.markdown("## 🆘 Known Gremlins")
+    st.markdown("Tracking known issues, accuracy gaps, and active fixes in real time.")
+
+    def status_tag(label):
+        colors = {
+            "OPEN": "#ef4444",
+            "IN PROGRESS": "#f59e0b",
+            "MITIGATED": "#3b82f6",
+            "RESOLVED": "#22c55e",
+        }
+        color = colors.get(label, "#64748b")
+        return f"""
+        <span style="
+            background:{color};
+            color:white;
+            padding:3px 10px;
+            border-radius:999px;
+            font-size:11px;
+            font-weight:600;
+            margin-left:8px;
+        ">
+            {label}
+        </span>
+        """
+
+    def issue_card(title, items, color):
+        rows = ""
+        for item, status, note in items:
+            note_html = f"<div style='font-size:12px; color:#9ca3af; margin-top:4px;'>{note}</div>" if note else ""
+            rows += f"<li style='margin-bottom:12px;'>{item} {status_tag(status)}{note_html}</li>"
+
+        return f"""
+        <div style="
+            border:1px solid {color};
+            border-radius:18px;
+            padding:22px;
+            background:rgba(255,255,255,0.02);
+            min-height:260px;
+        ">
+            <div style="color:{color}; font-size:16px; font-weight:700; margin-bottom:12px;">
+                {title}
+            </div>
+            <ul style="margin-left:18px; line-height:1.7;">
+                {rows}
+            </ul>
+        </div>
+        """
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown(
+            issue_card(
+                "📡 Data Integrity",
+                [
+                    (
+                        "Timezone-based sync misalignment",
+                        "IN PROGRESS",
+                        "Stores sync before local 4AM closeout in some regions"
+                    ),
+                    (
+                        "Dine-in Beverage % accuracy",
+                        "IN PROGRESS",
+                        "Currently derived instead of using true beverage sales dollars"
+                    ),
+                    (
+                        "PPA calculation consistency",
+                        "IN PROGRESS",
+                        "Mixed aggregation between check-level and grouped data"
+                    ),
+                ],
+                "#ef4444",
+            ),
+            unsafe_allow_html=True,
+        )
+
+    with col2:
+        st.markdown(
+            issue_card(
+                "⚙️ System Behavior",
+                [
+                    (
+                        "API rate limit pressure",
+                        "MITIGATED",
+                        "Location calls moved to DB instead of Rosnet API"
+                    ),
+                    (
+                        "Sync completeness visibility",
+                        "IN PROGRESS",
+                        "Freshness indicator added, expanding to store-level diagnostics"
+                    ),
+                    (
+                        "Cross-day aggregation edge cases",
+                        "OPEN",
+                        "Multi-day averaging may distort performance signals"
+                    ),
+                ],
+                "#f59e0b",
+            ),
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("")
+
+    col3, col4 = st.columns(2)
+
+    with col3:
+        st.markdown(
+            issue_card(
+                "📊 Reporting Gaps",
+                [
+                    (
+                        "No +/- previous period comparison",
+                        "OPEN",
+                        "Limits coaching context and trend visibility"
+                    ),
+                    (
+                        "No trend direction indicators",
+                        "OPEN",
+                        "No quick visual for improving vs declining performance"
+                    ),
+                    (
+                        "Limited filtering (server/store thresholds)",
+                        "PLANNED",
+                        "Will allow better focus on actionable data"
+                    ),
+                ],
+                "#3b82f6",
+            ),
+            unsafe_allow_html=True,
+        )
+
+    with col4:
+        st.markdown(
+            issue_card(
+                "🧠 Coaching & Insights",
+                [
+                    (
+                        "No automated coaching callouts",
+                        "PLANNED",
+                        "System does not yet identify top opportunities or risks"
+                    ),
+                    (
+                        "All-green logic not fully leveraged",
+                        "PLANNED",
+                        "Opportunity to highlight elite performers more clearly"
+                    ),
+                    (
+                        "No anomaly detection",
+                        "PLANNED",
+                        "Spikes/drops not flagged automatically"
+                    ),
+                ],
+                "#a855f7",
+            ),
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("---")
+    st.markdown(
+        "<center><i>We don’t hide issues. We surface them, own them, and fix them.</i></center>",
         unsafe_allow_html=True,
     )
 
