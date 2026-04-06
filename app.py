@@ -147,45 +147,43 @@ def render_freshness_sidebar():
 
     percent = (synced / total * 100) if total > 0 else 0
 
-    st.sidebar.markdown(
-        f"""
-        <div style="
-            padding:12px;
-            border-radius:12px;
-            background:{color}20;
-            border:1px solid {color};
-        ">
-            <div style="font-weight:700; color:{color}; margin-bottom:6px;">
-                {label}
-            </div>
-
-            <div style="font-size:12px; margin-bottom:6px;">
-                Last Sync:<br>
-                {last_sync_local.strftime('%I:%M %p %Z')}
-            </div>
-
-            <div style="font-size:12px;">
-                Progress: {synced} / {total} stores
-            </div>
-
-            <div style="
-                margin-top:6px;
-                height:6px;
-                background:#222;
-                border-radius:6px;
-                overflow:hidden;
-            ">
-                <div style="
-                    width:{percent}%;
-                    height:100%;
-                    background:{color};
-                "></div>
-            </div>
+    html = f"""
+    <div style="
+        padding:12px;
+        border-radius:12px;
+        background:{color}20;
+        border:1px solid {color};
+    ">
+        <div style="font-weight:700; color:{color}; margin-bottom:6px;">
+            {label}
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
+        <div style="font-size:12px; margin-bottom:6px;">
+            Last Sync:<br>
+            {last_sync_local.strftime('%I:%M %p %Z')}
+        </div>
+
+        <div style="font-size:12px;">
+            Progress: {synced} / {total} stores
+        </div>
+
+        <div style="
+            margin-top:6px;
+            height:6px;
+            background:#222;
+            border-radius:6px;
+            overflow:hidden;
+        ">
+            <div style="
+                width:{percent}%;
+                height:100%;
+                background:{color};
+            "></div>
+        </div>
+    </div>
+    """
+
+    st.sidebar.markdown(html, unsafe_allow_html=True)
 
 # -----------------------------
 # DATA PREP
