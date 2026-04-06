@@ -321,6 +321,7 @@ def transform_checks(df, store_id, day_str):
             "employee_name",
             "ppa",
             "beverage_pct",
+            "beverage_sales",
             "turn_time",
             "check_count",
             "guest_count",
@@ -342,18 +343,20 @@ def upsert_grouped_rows(conn, grouped_df, store_id, business_date):
                     employee_name,
                     ppa,
                     beverage_pct,
+                    beverage_sales,
                     turn_time,
                     check_count,
                     guest_count,
                     sales,
                     updated_at
                 )
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())
                 ON CONFLICT (store_number, business_date, employee_id)
                 DO UPDATE SET
                     employee_name = EXCLUDED.employee_name,
                     ppa = EXCLUDED.ppa,
                     beverage_pct = EXCLUDED.beverage_pct,
+                    beverage_sales = EXCLUDED.beverage_sales,
                     turn_time = EXCLUDED.turn_time,
                     check_count = EXCLUDED.check_count,
                     guest_count = EXCLUDED.guest_count,
@@ -367,6 +370,7 @@ def upsert_grouped_rows(conn, grouped_df, store_id, business_date):
                     row["employee_name"],
                     float(row["ppa"]),
                     float(row["beverage_pct"]),
+                    float(row["beverage_sales"]),
                     float(row["turn_time"]),
                     float(row["check_count"]),
                     float(row["guest_count"]),
