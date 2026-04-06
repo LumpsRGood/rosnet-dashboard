@@ -90,8 +90,8 @@ def get_sync_status():
 def render_freshness_sidebar():
     total, synced, last_sync = get_sync_status()
 
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### 📡 Data Freshness")
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📡 Data Freshness")
 
     if not last_sync:
         st.sidebar.warning("No sync data yet")
@@ -828,98 +828,77 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
 # SYNC FRESHNESS BANNER
 # -----------------------------
 def render_sync_freshness():
-    freshness = get_sync_freshness()
-    if not freshness:
+    total, synced, last_sync = get_sync_status()
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📡 Data Freshness")
+
+    if not last_sync:
+        st.sidebar.warning("No sync data yet")
         return
 
     try:
-        tz = ZoneInfo("America/Chicago")
-        today_local = datetime.now(tz).date()
-    except Exception:
-        today_local = datetime.now().date()
-
-    yesterday_local = today_local - timedelta(days=1)
-
-    latest_date = freshness.get("latest_business_date")
-    last_attempted = freshness.get("last_attempted_at")
-    total_stores = int(freshness.get("total_stores") or 0)
-    synced_store_count = int(freshness.get("synced_store_count") or 0)
-
-    if pd.isna(latest_date):
-        status_label = "NO DATA"
-        status_color = "#ef4444"
-        bg_color = "#321717"
-        latest_date_text = "None"
-    else:
-        latest_date = pd.to_datetime(latest_date).date()
-        latest_date_text = latest_date.strftime("%b %d, %Y")
-
-        if latest_date == yesterday_local and synced_store_count == total_stores:
-            status_label = "FRESH"
-            status_color = "#22c55e"
-            bg_color = "#13281c"
-        elif latest_date == yesterday_local:
-            status_label = "PARTIAL"
-            status_color = "#eab308"
-            bg_color = "#2e270f"
-        else:
-            status_label = "STALE"
-            status_color = "#ef4444"
-            bg_color = "#321717"
-
-    if pd.isna(last_attempted):
-        last_attempted_text = "Unknown"
-    else:
         local_tz = ZoneInfo("America/Chicago")
-        last_attempted_ts = pd.to_datetime(last_attempted, utc=True).tz_convert(local_tz)
-        last_attempted_text = last_attempted_ts.strftime("%b %d, %Y %I:%M %p %Z")
+        last_sync_local = last_sync.astimezone(local_tz)
+    except Exception:
+        last_sync_local = last_sync
 
-    st.markdown(
+    now = datetime.now(last_sync_local.tzinfo)
+    diff_minutes = (now - last_sync_local).total_seconds() / 60
+
+    if diff_minutes < 30:
+        color = "#22c55e"
+        label = "Fresh"
+    elif diff_minutes < 120:
+        color = "#facc15"
+        label = "Delayed"
+    else:
+        color = "#ef4444"
+        label = "Stale"
+
+    percent = (synced / total * 100) if total > 0 else 0
+
+    st.sidebar.markdown(
         f"""
         <div style="
-            border:1px solid {status_color};
-            background:{bg_color};
-            border-radius:16px;
-            padding:16px 18px;
-            margin:10px 0 18px 0;
+            padding:12px;
+            border-radius:12px;
+            background:{color}20;
+            border:1px solid {color};
         ">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap;">
-                <div>
-                    <div style="color:{status_color}; font-size:13px; font-weight:700; letter-spacing:1px;">
-                        DATA FRESHNESS
-                    </div>
-                    <div style="color:white; font-size:15px; margin-top:6px;">
-                        Last sync completed: <b>{last_attempted_text}</b><br>
-                        Latest business date loaded: <b>{latest_date_text}</b><br>
-                        Stores synced for latest date: <b>{synced_store_count} of {total_stores}</b>
-                    </div>
-                </div>
+            <div style="font-weight:700; color:{color}; margin-bottom:6px;">
+                {label}
+            </div>
+
+            <div style="font-size:12px; margin-bottom:6px;">
+                Last Sync:<br>
+                {last_sync_local.strftime('%I:%M %p')}
+            </div>
+
+            <div style="font-size:12px;">
+                Progress: {synced} / {total} stores
+            </div>
+
+            <div style="
+                margin-top:6px;
+                height:6px;
+                background:#222;
+                border-radius:6px;
+                overflow:hidden;
+            ">
                 <div style="
-                    background:{status_color};
-                    color:white;
-                    font-weight:700;
-                    font-size:12px;
-                    padding:8px 14px;
-                    border-radius:999px;
-                    white-space:nowrap;
-                ">
-                    {status_label}
-                </div>
+                    width:{percent}%;
+                    height:100%;
+                    background:{color};
+                "></div>
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-
-
 # -----------------------------
 # MAIN RENDER
 # -----------------------------
-st.title("*Almost* Live Rosnet Turn and Beverage Data 📈")
-st.warning(
-    "🚧 **Under Development:** This dashboard is currently in active testing. Errors may occasionally occur. Please contact **Chad** with any issues, feedback, or UI suggestions."
-)
-
 render_sync_freshness()
 
 tab1, tab2, tab3, tab4 = st.tabs([
