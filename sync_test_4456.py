@@ -69,6 +69,34 @@ cols_to_show = [
 ]
 
 print(bev_rows[cols_to_show].sort_values(["serverName", "checkNumber"]).to_string(index=False))
+suspect_servers = [
+    "SMITH, ALYSON",
+    "Lusk, Taylor",
+    "Helsel, Colten",
+    "Benefield, Shayla",
+]
+
+print("\n=== SUSPECT SERVER BEVERAGE CHECKS ===")
+suspect_rows = bev_rows[bev_rows["serverName"].isin(suspect_servers)].copy()
+
+cols_to_show = [
+    c for c in [
+        "serverName",
+        "checkNumber",
+        "guestCount",
+        "netSales",
+        "beverageSales",
+        "orderType",
+        "openTime",
+        "closeTime",
+    ] if c in suspect_rows.columns
+]
+
+print(
+    suspect_rows[cols_to_show]
+    .sort_values(["serverName", "beverageSales", "checkNumber"], ascending=[True, False, True])
+    .to_string(index=False)
+)
 
 # TRANSFORM
 df["openTime"] = pd.to_datetime(df["openTime"], format="%H:%M:%S", errors="coerce")
