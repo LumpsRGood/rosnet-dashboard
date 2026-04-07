@@ -49,6 +49,26 @@ df = df[
 ].copy()
 
 print(f"Rows after filter: {len(df)}")
+print("\n=== ORDER TYPE VALUES AFTER FILTER ===")
+print(df["orderType"].value_counts(dropna=False))
+
+print("\n=== BEVERAGE SALES ROWS ===")
+bev_rows = df[pd.to_numeric(df["beverageSales"], errors="coerce").fillna(0) > 0].copy()
+
+cols_to_show = [
+    c for c in [
+        "serverName",
+        "checkNumber",
+        "orderType",
+        "guestCount",
+        "netSales",
+        "beverageSales",
+        "openTime",
+        "closeTime",
+    ] if c in bev_rows.columns
+]
+
+print(bev_rows[cols_to_show].sort_values(["serverName", "checkNumber"]).to_string(index=False))
 
 # TRANSFORM
 df["openTime"] = pd.to_datetime(df["openTime"], format="%H:%M:%S", errors="coerce")
