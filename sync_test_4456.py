@@ -87,6 +87,12 @@ grouped = (
     )
     .reset_index()
 )
+print("\n=== SERVER BEVERAGE TOTALS ===")
+print(
+    grouped[["serverName", "sales", "beverage_sales"]]
+    .sort_values("serverName")
+    .to_string(index=False)
+)
 
 grouped["ppa"] = grouped["sales"] / grouped["check_count"]
 grouped["beverage_pct"] = grouped["beverage_sales"] / grouped["sales"] * 100
