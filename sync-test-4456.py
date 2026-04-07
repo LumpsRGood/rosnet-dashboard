@@ -1,0 +1,80 @@
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+import psycopg2
+import pandas as pd
+import api
+import os
+
+# DB CONFIG
+conn = psycopg2.connect(
+    host=os.getenv("DB_HOST"),
+    port=os.getenv("DB_PORT"),
+    dbname=os.getenv("DB_NAME"),
+    user=os.getenv("DB_USER"),
+    password=os.getenv("DB_PASSWORD"),
+)
+
+STORE_ID = 4456
+
+tz = ZoneInfo("America/New_York")
+today = datetime.now(tz).date()
+target_date = today - timedelta(days=1)
+day_str = target_date.strftime("%Y-%m-%d")
+
+print(f"Testing store {STORE_ID} for {day_str}")
+
+# Get data
+emp_map = api.get_employees_map(STORE_ID)
+bev_ids = api.get_beverage_category_ids()
+
+checks = api.get_checks(
+    day_str,
+    day_str,
+    STORE_ID,
+    emp_map=emp_map,
+    bev_cat_ids=bev_ids,
+)
+
+df = pd.DataFrame(checks)
+
+if df.empty:
+    print("No data returned")
+    exit()
+
+# SIMPLE DINE-IN FILTER (NEW LOGIC)
+order_type = df["orderType"].fillna("").astype(str).str.lower()
+df = df[
+    order_type.str.contains("dine") |
+    order_type.str.contains("eat")
+].copy()
+
+print(f"Rows after filter: {len(df)}")
+
+# TRANSFORM
+df["openTime"] = pd.to_datetime(df["openTime"], format="%H:%M:%S", errors="coerce")
+df["closeTime"] = pd.to_datetime(df["closeTime"], format="%H:%M:%S", errors="coerce")
+
+df["turn_time"] = (df["closeTime"] - df["openTime"]).dt.total_seconds() / 60
+df = df[df["turn_time"] > 0]
+
+grouped = (
+    df.groupby("serverName")
+    .agg(
+        sales=("netSales", "sum"),
+        beverage_sales=("beverageSales", "sum"),
+        turn_time=("turn_time", "mean"),
+        check_count=("checkNumber", "count"),
+    )
+    .reset_index()
+)
+
+grouped["ppa"] = grouped["sales"] / grouped["check_count"]
+grouped["beverage_pct"] = grouped["beverage_sales"] / grouped["sales"] * 100
+
+print("\n=== RESULTS ===")
+print(grouped)
+
+print("\n=== TOTALS ===")
+print("Sales:", round(grouped["sales"].sum(), 2))
+print("Bev Sales:", round(grouped["beverage_sales"].sum(), 2))
+print("Bev %:", round(grouped["beverage_sales"].sum() / grouped["sales"].sum() * 100, 2))
