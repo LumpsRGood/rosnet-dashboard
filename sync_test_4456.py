@@ -47,9 +47,10 @@ df = df[
     order_type.str.contains("dine") |
     order_type.str.contains("eat")
 ].copy()
-df = df[
-    pd.to_numeric(df["guestCount"], errors="coerce").fillna(0) > 0
-].copy()
+guest_count = pd.to_numeric(df["guestCount"], errors="coerce").fillna(0)
+
+# subtract beverage from zero-guest checks ONLY
+df.loc[guest_count == 0, "beverageSales"] = 0
 
 print(f"Rows after filter: {len(df)}")
 print("\n=== ORDER TYPE VALUES AFTER FILTER ===")
