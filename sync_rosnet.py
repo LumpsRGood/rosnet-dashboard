@@ -196,37 +196,12 @@ def filter_to_true_dine_in(df: pd.DataFrame) -> pd.DataFrame:
     if "orderType" not in df.columns:
         return pd.DataFrame()
 
-    order_type = df["orderType"].fillna("").astype(str).str.strip().str.lower()
+    order_type = df["orderType"].fillna("").astype(str).str.lower()
 
-    allowed = {
-        "eat in",
-        "eat-in",
-        "dine in",
-        "dine-in",
-    }
-
-    excluded_contains = [
-        "staff",
-        "olo",
-        "online",
-        "to go",
-        "togo",
-        "to-go",
-        "delivery",
-        "pickup",
-        "carryout",
-        "carry out",
-        "curbside",
-        "3rd party",
-        "third party",
-    ]
-
-    dine_mask = order_type.isin(allowed)
-    for bad in excluded_contains:
-        dine_mask &= ~order_type.str.contains(bad, na=False)
-
-    return df[dine_mask].copy()
-
+    return df[
+        order_type.str.contains("dine") |
+        order_type.str.contains("eat")
+    ].copy()
 
 def transform_checks(df, store_id, day_str):
     if df.empty:
