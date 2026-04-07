@@ -76,6 +76,36 @@ suspect_servers = [
     "Benefield, Shayla",
 ]
 
+suspect_checks = [
+    279372625,  # Benefield, 4.69
+    279458643,  # Helsel, 3.49 maybe suspect
+    279465347,  # Lusk, 3.49 maybe suspect
+    279360062,  # Alyson, 8.18
+    279381627,  # Alyson, 13.06
+]
+
+detail_cols = [
+    c for c in [
+        "serverName",
+        "checkNumber",
+        "itemName",
+        "categoryName",
+        "groupName",
+        "quantity",
+        "price",
+        "netSales",
+        "beverageSales",
+        "orderType",
+    ] if c in df.columns
+]
+
+print("\n=== SUSPECT CHECK DETAIL ===")
+print(
+    df[df["checkNumber"].isin(suspect_checks)][detail_cols]
+    .sort_values(["checkNumber", "itemName"] if "itemName" in detail_cols else ["checkNumber"])
+    .to_string(index=False)
+)
+
 print("\n=== SUSPECT SERVER BEVERAGE CHECKS ===")
 suspect_rows = bev_rows[bev_rows["serverName"].isin(suspect_servers)].copy()
 
