@@ -1118,7 +1118,7 @@ with tab4:
                     ("+/- vs Previous Period", "IN PROGRESS", ""),
                     ("Trend Indicators (↑ ↓)", "PLANNED", ""),
                     ("Top & Bottom Movers", "PLANNED", ""),
-                    ("Enhanced WhatsApp Exports", "IN PROGRESS", ""),
+                    ("Enhanced WhatsApp Exports", "LIVE", "Now includes visual scorecards"),
                 ],
                 "#22c55e",
             ),
@@ -1130,6 +1130,7 @@ with tab4:
             roadmap_card(
                 "🧠 Smarter Insights",
                 [
+                    ("Ghost Check Tracking", "LIVE", "Deployed in Audit Sandbox"),
                     ("Coaching Callouts", "PLANNED", ""),
                     ("Highlight Underperformers", "PLANNED", ""),
                     ("Server Search & Filters", "PLANNED", ""),
@@ -1149,6 +1150,7 @@ with tab4:
             roadmap_card(
                 "📈 Data Evolution",
                 [
+                    ("PPA True Accuracy", "LIVE", "All segments tracked correctly"),
                     ("WTD / MTD Comparisons", "PLANNED", ""),
                     ("Store Rank Movement", "PLANNED", ""),
                     ("Historical Trends", "PLANNED", ""),
@@ -1243,13 +1245,13 @@ with tab5:
                     ),
                     (
                         "Dine-in Beverage % accuracy",
-                        "IN PROGRESS",
-                        "Currently derived instead of using true beverage sales dollars"
+                        "RESOLVED",
+                        "Now isolated strictly to dine-in receipts"
                     ),
                     (
                         "PPA calculation consistency",
-                        "IN PROGRESS",
-                        "Mixed aggregation between check-level and grouped data"
+                        "RESOLVED",
+                        "True global PPA across all checks now live"
                     ),
                 ],
                 "#ef4444",
