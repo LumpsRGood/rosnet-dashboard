@@ -1118,7 +1118,7 @@ with tab4:
                     ("+/- vs Previous Period", "IN PROGRESS", ""),
                     ("Trend Indicators (↑ ↓)", "PLANNED", ""),
                     ("Top & Bottom Movers", "PLANNED", ""),
-                    ("Enhanced WhatsApp Exports", "LIVE", "Now includes visual scorecards"),
+                    ("Enhanced WhatsApp Exports", "LIVE", "Now includes visual scorecards (v1.8.2)"),
                 ],
                 "#22c55e",
             ),
@@ -1130,7 +1130,7 @@ with tab4:
             roadmap_card(
                 "🧠 Smarter Insights",
                 [
-                    ("Ghost Check Tracking", "LIVE", "Deployed in Audit Sandbox"),
+                    ("Ghost Check Tracking", "LIVE", "Deployed in Audit Sandbox (v1.8.2)"),
                     ("Coaching Callouts", "PLANNED", ""),
                     ("Highlight Underperformers", "PLANNED", ""),
                     ("Server Search & Filters", "PLANNED", ""),
@@ -1150,7 +1150,7 @@ with tab4:
             roadmap_card(
                 "📈 Data Evolution",
                 [
-                    ("PPA True Accuracy", "LIVE", "All segments tracked correctly"),
+                    ("PPA True Accuracy", "LIVE", "All segments tracked correctly (v1.8.2)"),
                     ("WTD / MTD Comparisons", "PLANNED", ""),
                     ("Store Rank Movement", "PLANNED", ""),
                     ("Historical Trends", "PLANNED", ""),
@@ -1246,12 +1246,12 @@ with tab5:
                     (
                         "Dine-in Beverage % accuracy",
                         "RESOLVED",
-                        "Now isolated strictly to dine-in receipts"
+                        "Now isolated strictly to dine-in receipts (v1.8.2)"
                     ),
                     (
                         "PPA calculation consistency",
                         "RESOLVED",
-                        "True global PPA across all checks now live"
+                        "True global PPA across all checks now live (v1.8.2)"
                     ),
                 ],
                 "#ef4444",
