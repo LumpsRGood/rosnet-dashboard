@@ -113,6 +113,36 @@ def get_data_from_db(start_date, end_date, locations=None):
     return df
 
 
+@st.cache_data(ttl=300)
+def get_zero_guest_alerts_from_db(start_date, end_date, locations=None):
+    conn = get_db_connection()
+    try:
+        if locations:
+            locations = [int(x) for x in locations]
+            query = """
+                SELECT *
+                FROM employee_zero_guest_alerts
+                WHERE store_number = ANY(%s::bigint[])
+                  AND business_date BETWEEN %s AND %s
+                ORDER BY business_date, store_number, employee_name
+            """
+            df = pd.read_sql(query, conn, params=(locations, start_date, end_date))
+        else:
+            query = """
+                SELECT *
+                FROM employee_zero_guest_alerts
+                WHERE business_date BETWEEN %s AND %s
+                ORDER BY business_date, store_number, employee_name
+            """
+            df = pd.read_sql(query, conn, params=(start_date, end_date))
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+    return df
+
+
 # -----------------------------
 # SIDEBAR FRESHNESS
 # -----------------------------
@@ -195,6 +225,41 @@ def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def prepare_zero_guest_alerts_df(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df.copy()
+
+    out = df.copy()
+
+    numeric_cols = [
+        "store_number",
+        "zero_guest_check_count",
+        "zero_guest_sales",
+        "zero_guest_beverage_sales",
+    ]
+    for col in numeric_cols:
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
+
+    if "business_date" in out.columns:
+        out["business_date"] = pd.to_datetime(out["business_date"], errors="coerce").dt.date
+
+    out = out.dropna(
+        subset=[
+            "store_number",
+            "business_date",
+            "employee_name",
+            "zero_guest_check_count",
+            "zero_guest_sales",
+            "zero_guest_beverage_sales",
+        ]
+    ).copy()
+
+    out["store_number"] = out["store_number"].astype(int)
+    out = out[out["zero_guest_check_count"] > 0].copy()
+    return out
+
+
 def weighted_bev_pct(df: pd.DataFrame) -> float:
     if df.empty:
         return 0.0
@@ -215,9 +280,9 @@ def aggregate_store_day_ppa(df: pd.DataFrame) -> float:
     return float(store_day["ppa"].mean()) if not store_day.empty else 0.0
 
 
-def build_server_summary(df: pd.DataFrame) -> pd.DataFrame:
+def build_server_summary(df: pd.DataFrame, zg_df: pd.DataFrame = None) -> pd.DataFrame:
     if df.empty:
-        return pd.DataFrame(columns=["employee_name", "turn_time", "beverage_pct", "ppa"])
+        return pd.DataFrame(columns=["employee_name", "turn_time", "beverage_pct", "ppa", "zero_checks"])
 
     grouped = (
         df.groupby("employee_name", dropna=False)
@@ -242,7 +307,71 @@ def build_server_summary(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     grouped = grouped[["employee_name", "turn_time", "beverage_pct", "ppa"]]
+    
+    if zg_df is not None and not zg_df.empty:
+        zg_agg = zg_df.groupby("employee_name", dropna=False).agg(zero_checks=("zero_guest_check_count", "sum")).reset_index()
+        grouped = grouped.merge(zg_agg, on="employee_name", how="left")
+        grouped["zero_checks"] = grouped["zero_checks"].fillna(0).astype(int)
+    else:
+        grouped["zero_checks"] = 0
+
     return grouped.sort_values("turn_time", ascending=True).reset_index(drop=True)
+
+
+def build_zero_guest_alert_summary(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame(
+            columns=[
+                "employee_name",
+                "zero_guest_check_count",
+                "zero_guest_sales",
+                "zero_guest_beverage_sales",
+                "flagged_days",
+                "date_range",
+                "trend",
+            ]
+        )
+
+    grouped = (
+        df.groupby("employee_name", dropna=False)
+        .agg(
+            zero_guest_check_count=("zero_guest_check_count", "sum"),
+            zero_guest_sales=("zero_guest_sales", "sum"),
+            zero_guest_beverage_sales=("zero_guest_beverage_sales", "sum"),
+            flagged_days=("business_date", "nunique"),
+            first_flagged_date=("business_date", "min"),
+            last_flagged_date=("business_date", "max"),
+        )
+        .reset_index()
+    )
+
+    def format_date_range(row):
+        first_date = row["first_flagged_date"]
+        last_date = row["last_flagged_date"]
+        if pd.isna(first_date) or pd.isna(last_date):
+            return ""
+        if first_date == last_date:
+            return pd.to_datetime(first_date).strftime("%b %d, %Y")
+        return (
+            f"{pd.to_datetime(first_date).strftime('%b %d, %Y')} - "
+            f"{pd.to_datetime(last_date).strftime('%b %d, %Y')}"
+        )
+
+    def format_trend(row):
+        flagged_days = int(row["flagged_days"])
+        if flagged_days <= 1:
+            return "Single day"
+        return f"Repeated over {flagged_days} days"
+
+    grouped["date_range"] = grouped.apply(format_date_range, axis=1)
+    grouped["trend"] = grouped.apply(format_trend, axis=1)
+
+    grouped = grouped.sort_values(
+        ["flagged_days", "zero_guest_check_count", "zero_guest_sales", "employee_name"],
+        ascending=[False, False, False, True],
+    ).reset_index(drop=True)
+
+    return grouped
 
 
 def build_location_summary(df: pd.DataFrame, loc_map: dict) -> pd.DataFrame:
@@ -375,12 +504,18 @@ def style_server_summary(df: pd.DataFrame):
             return "background-color: #f0d766; color: #111827;"
         return "background-color: #f8696b; color: white;"
 
+    def color_zero_checks(v):
+        if pd.isna(v) or v == 0:
+            return "color: #4b5563;"
+        return "background-color: #f8696b; color: white; font-weight: bold;"
+
     display_df = df.rename(
         columns={
             "employee_name": "Server",
             "turn_time": "Turn Time",
             "beverage_pct": "Dine In Bev %",
             "ppa": "PPA",
+            "zero_checks": "Ghost Checks"
         }
     )
 
@@ -389,12 +524,59 @@ def style_server_summary(df: pd.DataFrame):
             "Turn Time": "{:.2f}",
             "Dine In Bev %": "{:.2f}%",
             "PPA": "${:.2f}",
+            "Ghost Checks": "{:.0f}"
         }
     )
     styler = styler.map(color_turn, subset=["Turn Time"])
     styler = styler.map(color_bev, subset=["Dine In Bev %"])
     styler = styler.map(color_ppa, subset=["PPA"])
+    styler = styler.map(color_zero_checks, subset=["Ghost Checks"])
     return styler
+
+
+def style_zero_guest_alert_summary(df: pd.DataFrame):
+    display_df = df.rename(
+        columns={
+            "employee_name": "Server",
+            "date_range": "Occurrence Date(s)",
+            "flagged_days": "Days Flagged",
+            "trend": "Trend",
+            "zero_guest_check_count": "Zero-Guest Checks",
+            "zero_guest_sales": "Sales Attached",
+            "zero_guest_beverage_sales": "Bev Sales Attached",
+        }
+    )
+
+    styler = display_df.style.format(
+        {
+            "Occurrence Date(s)": "{}",
+            "Days Flagged": "{:.0f}",
+            "Trend": "{}",
+            "Zero-Guest Checks": "{:.0f}",
+            "Sales Attached": "${:.2f}",
+            "Bev Sales Attached": "${:.2f}",
+        }
+    )
+    return styler
+
+
+def render_zero_guest_alert_box(df: pd.DataFrame):
+    if df.empty:
+        return
+
+    total_checks = int(df["zero_guest_check_count"].sum())
+    total_sales = float(df["zero_guest_sales"].sum())
+    total_bev = float(df["zero_guest_beverage_sales"].sum())
+
+    st.warning(
+        f"Zero-guest checks detected: {total_checks} check(s) with ${total_sales:.2f} in sales "
+        f"and ${total_bev:.2f} in beverage sales. Review for possible missed cover entry."
+    )
+    st.dataframe(
+        style_zero_guest_alert_summary(df),
+        use_container_width=True,
+        height=min(280, 45 + len(df) * 35),
+    )
 
 
 # -----------------------------
@@ -763,6 +945,8 @@ with st.spinner("Loading stored Rosnet data..."):
         st.error(f"Error fetching data from database: {e}")
         st.stop()
 
+    zero_guest_raw_df = get_zero_guest_alerts_from_db(start_date, end_date, active_locations)
+
 if raw_df.empty:
     if selected_locations:
         st.warning(
@@ -777,6 +961,7 @@ if raw_df.empty:
     st.stop()
 
 df = prepare_display_df(raw_df)
+zero_guest_df = prepare_zero_guest_alerts_df(zero_guest_raw_df)
 
 if df.empty:
     st.warning("Data was returned, but none of it matched the fields required by the dashboard.")
@@ -786,12 +971,13 @@ if df.empty:
 # -----------------------------
 # TABS
 # -----------------------------
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📊 Overview",
     "👨‍🍳 Server Performance",
-    "🧾 Dataset",
+    "⚠️ Audit & Compliance",
     "🚀 Coming Attractions",
-    "🆘 Known Gremlins"
+    "🆘 Known Gremlins",
+    "🧾 Dataset"
 ])
 
 with tab1:
@@ -827,7 +1013,13 @@ with tab2:
 
             render_kpi_cards(loc_df, header_label="STORE TOTAL")
 
-            server_df = build_server_summary(loc_df)
+            server_df = build_server_summary(loc_df, zero_guest_df[zero_guest_df["store_number"] == int(loc)])
+            loc_zero_guest_df = build_zero_guest_alert_summary(
+                zero_guest_df[zero_guest_df["store_number"] == int(loc)].copy()
+            )
+
+            if not loc_zero_guest_df.empty:
+                render_zero_guest_alert_box(loc_zero_guest_df)
 
             st.dataframe(
                 style_server_summary(server_df),
@@ -849,8 +1041,22 @@ with tab2:
             )
 
 with tab3:
-    st.markdown("### Combined Stored Dataset")
-    st.dataframe(df, use_container_width=True, height=600)
+    st.markdown("## ⚠️ Audit & Compliance")
+    st.markdown("The Manager's Coaching Sandbox. Track adherence and catch bad habits before they ruin your data.")
+    
+    st.markdown("### Coming Soon to this Tab:")
+    
+    def coming_soon_card(title, description):
+        return f"""
+        <div style="border:1px solid #475569; border-radius:12px; padding:20px; background:rgba(255,255,255,0.03); margin-bottom:15px;">
+            <div style="font-size:16px; font-weight:700; color:#f8fafc; margin-bottom:6px;">{title}</div>
+            <div style="font-size:14px; color:#94a3b8; line-height:1.5;">{description}</div>
+        </div>
+        """
+    
+    st.markdown(coming_soon_card("📈 30-Day Ghost Check Trends", "A line graph showing exactly how many 0-cover checks your team is ringing up over the month so you can spot failing habits visually."), unsafe_allow_html=True)
+    st.markdown(coming_soon_card("🚨 Repeat Offender Leaderboard", "A dedicated ranking of which servers are artificially inflating their PPA the most, measuring the exact dollar amount of 'invisible PPA' they are causing."), unsafe_allow_html=True)
+    st.markdown(coming_soon_card("⏱️ 'Campers' & Phantom Tables", "Alerts for checks that stay open suspiciously long (or short) to catch unclosed tickets messing up your Turn Time metric."), unsafe_allow_html=True)
 
 with tab4:
     st.markdown("## 🚀 Coming Attractions")
@@ -1138,6 +1344,11 @@ with tab5:
         "<center><i>We don’t hide issues. We surface them, own them, and fix them.</i></center>",
         unsafe_allow_html=True,
     )
+
+with tab6:
+    st.markdown("### Combined Stored Dataset")
+    st.markdown("Raw diagnostic data view. This tab will be removed in a future update.")
+    st.dataframe(df, use_container_width=True, height=600)
 
 st.markdown(
     f"<br><hr><center><small>Powered by Rosnet Sync + Supabase | {APP_VERSION}</small></center>",

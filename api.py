@@ -271,13 +271,25 @@ def get_checks(start_date, end_date, location_id, emp_map=None, bev_cat_ids=None
             
             # Calculate sales breakdown from items (including beverage classification)
             bev_sales = 0.0
-            net_sales = 0.0
+            computed_net_sales = 0.0
             for item in c.get('ItemsSold', []):
                 price = item.get('SoldPrice', 0)
-                net_sales += price
-                cat_id = item.get('ItemMajorCatId')
-                if bev_cat_ids and cat_id in bev_cat_ids:
+                computed_net_sales += price
+                
+                is_bev = False
+                # 1. Match against known Major Category IDs (Beer/Wine/Liquor or known Beverage major cat)
+                if bev_cat_ids and item.get('ItemMajorCatId') in bev_cat_ids:
+                    is_bev = True
+                # 2. Check the raw string names Rosnet provides on the item level
+                elif 'beverage' in str(item.get('ItemMajorCatName', '')).lower():
+                    is_bev = True
+                elif 'beverage' in str(item.get('ItemSubCatName', '')).lower():
+                    is_bev = True
+                
+                if is_bev:
                     bev_sales += price
+
+            net_sales = computed_net_sales
 
             if server == "Unknown Server" and net_sales == 0:
                 continue # Ghost Check / Voids

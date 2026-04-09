@@ -1,5 +1,6 @@
 import os
 import time
+import hashlib
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -27,6 +28,9 @@ SYNC_LOOKBACK_DAYS = int(sync_lookback_raw) if sync_lookback_raw and sync_lookba
 
 max_stores_raw = os.getenv("MAX_STORES_PER_RUN")
 MAX_STORES_PER_RUN = int(max_stores_raw) if max_stores_raw and max_stores_raw.strip() else 8
+
+target_store_raw = os.getenv("TARGET_STORE")
+TARGET_STORE = int(target_store_raw) if target_store_raw and target_store_raw.strip() else None
 
 request_delay_raw = os.getenv("REQUEST_DELAY_SECONDS")
 REQUEST_DELAY_SECONDS = float(request_delay_raw) if request_delay_raw and request_delay_raw.strip() else 3.0
@@ -85,6 +89,27 @@ def ensure_tables(conn):
             ON employee_daily_metrics (business_date, store_number);
             """
         )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS employee_zero_guest_alerts (
+                store_number bigint NOT NULL,
+                business_date date NOT NULL,
+                employee_id bigint NOT NULL,
+                employee_name text,
+                zero_guest_check_count integer NOT NULL DEFAULT 0,
+                zero_guest_sales numeric NOT NULL DEFAULT 0,
+                zero_guest_beverage_sales numeric NOT NULL DEFAULT 0,
+                updated_at timestamptz DEFAULT now(),
+                PRIMARY KEY (store_number, business_date, employee_id)
+            );
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_employee_zero_guest_alerts_date_store
+            ON employee_zero_guest_alerts (business_date, store_number);
+            """
+        )
         conn.commit()
     finally:
         cur.close()
@@ -126,20 +151,43 @@ def seed_sync_progress(conn, loc_map):
 def select_stores_for_run(conn, target_date, max_stores):
     cur = conn.cursor()
     try:
-        cur.execute(
-            """
-            SELECT store_number, store_name, last_synced_date
-            FROM sync_progress
-            WHERE last_synced_date IS NULL
-               OR last_synced_date < %s
-            ORDER BY
-                CASE WHEN last_synced_date IS NULL THEN 0 ELSE 1 END,
-                last_synced_date NULLS FIRST,
-                store_number
-            LIMIT %s;
-            """,
-            (target_date, max_stores),
-        )
+        if TARGET_STORE is not None:
+            cur.execute(
+                """
+                SELECT store_number, store_name, last_synced_date
+                FROM sync_progress
+                WHERE store_number = %s
+                  AND (
+                      last_synced_date IS NULL
+                      OR last_synced_date < %s
+                  )
+                ORDER BY
+                    CASE WHEN last_synced_date IS NULL THEN 0 ELSE 1 END,
+                    last_synced_date NULLS FIRST,
+                    store_number
+                LIMIT %s;
+                """,
+                (TARGET_STORE, target_date, max_stores),
+            )
+        else:
+            target_stores = (3231, 4445, 4456, 4463)
+            cur.execute(
+                """
+                SELECT store_number, store_name, last_synced_date
+                FROM sync_progress
+                WHERE store_number IN %s
+                  AND (
+                      last_synced_date IS NULL
+                      OR last_synced_date < %s
+                  )
+                ORDER BY
+                    CASE WHEN last_synced_date IS NULL THEN 0 ELSE 1 END,
+                    last_synced_date NULLS FIRST,
+                    store_number
+                LIMIT %s;
+                """,
+                (target_stores, target_date, max_stores),
+            )
         return cur.fetchall()
     finally:
         cur.close()
@@ -203,11 +251,13 @@ def filter_to_true_dine_in(df: pd.DataFrame) -> pd.DataFrame:
         order_type.str.contains("eat")
     ].copy()
 
-def transform_checks(df, store_id, day_str):
-    if df.empty:
-        return pd.DataFrame()
 
-    df = filter_to_true_dine_in(df)
+def stable_employee_id(store_id, day_str, server_name):
+    raw = f"{int(store_id)}|{day_str}|{str(server_name).strip()}".encode("utf-8")
+    digest = hashlib.sha256(raw).digest()
+    return int.from_bytes(digest[:4], "big") & 0x7FFFFFFF
+
+def transform_checks(df, store_id, day_str):
     if df.empty:
         return pd.DataFrame()
 
@@ -225,6 +275,27 @@ def transform_checks(df, store_id, day_str):
         print(f"    skipped, missing columns: {sorted(missing)}")
         return pd.DataFrame()
 
+    df["guestCount"] = pd.to_numeric(df["guestCount"], errors="coerce").fillna(0)
+    df["netSales"] = pd.to_numeric(df["netSales"], errors="coerce").fillna(0)
+
+    # Calculate global PPA across ALL segments (Dine-In, Carry-Out, OLO, etc)
+    global_grouped = (
+        df.groupby("serverName", dropna=False)
+        .agg(
+            total_sales=("netSales", "sum"),
+            total_guest_count=("guestCount", "sum"),
+        ).reset_index()
+    )
+    global_grouped["ppa"] = global_grouped.apply(
+        lambda r: (r["total_sales"] / r["total_guest_count"]) if r["total_guest_count"] > 0 else 0.0, axis=1
+    )
+
+    # Now filter down strictly to Dine-In for the rest of the metrics (Turn Time, Bev %, Dine-in Sales)
+    df = filter_to_true_dine_in(df)
+    
+    if df.empty:
+        return pd.DataFrame()
+
     df = df.dropna(
         subset=[
             "serverName",
@@ -235,11 +306,6 @@ def transform_checks(df, store_id, day_str):
         ]
     ).copy()
 
-    if df.empty:
-        return pd.DataFrame()
-
-    df["guestCount"] = pd.to_numeric(df["guestCount"], errors="coerce").fillna(0)
-    df = df[df["guestCount"] > 0].copy()
     if df.empty:
         return pd.DataFrame()
 
@@ -267,14 +333,12 @@ def transform_checks(df, store_id, day_str):
         .reset_index()
     )
 
-    grouped = grouped[grouped["guest_count"] > 0].copy()
     if grouped.empty:
         return pd.DataFrame()
 
-    grouped["ppa"] = grouped.apply(
-        lambda r: (r["sales"] / r["guest_count"]) if r["guest_count"] > 0 else 0.0,
-        axis=1,
-    )
+
+    grouped = pd.merge(grouped, global_grouped[["serverName", "ppa"]], on="serverName", how="left")
+    grouped["ppa"] = grouped["ppa"].fillna(0.0)
 
     grouped["beverage_pct"] = (
         (grouped["beverage_sales"] / grouped["sales"])
@@ -286,7 +350,7 @@ def transform_checks(df, store_id, day_str):
     grouped["employee_id"] = (
         grouped["serverName"]
         .fillna("")
-        .apply(lambda x: abs(hash((int(store_id), day_str, x))) % 2147483647)
+        .apply(lambda x: stable_employee_id(store_id, day_str, x))
     )
     grouped["employee_name"] = grouped["serverName"]
 
@@ -301,6 +365,73 @@ def transform_checks(df, store_id, day_str):
             "check_count",
             "guest_count",
             "sales",
+        ]
+    ]
+
+
+def build_zero_guest_alerts(df, store_id, day_str):
+    if df.empty:
+        return pd.DataFrame()
+
+    df = filter_to_true_dine_in(df)
+    if df.empty:
+        return pd.DataFrame()
+
+    required = {
+        "serverName",
+        "checkNumber",
+        "netSales",
+        "beverageSales",
+        "guestCount",
+    }
+    missing = required - set(df.columns)
+    if missing:
+        return pd.DataFrame()
+
+    work_df = df.dropna(
+        subset=[
+            "serverName",
+            "checkNumber",
+            "netSales",
+            "beverageSales",
+            "guestCount",
+        ]
+    ).copy()
+    if work_df.empty:
+        return pd.DataFrame()
+
+    work_df["guestCount"] = pd.to_numeric(work_df["guestCount"], errors="coerce").fillna(0)
+    work_df["netSales"] = pd.to_numeric(work_df["netSales"], errors="coerce").fillna(0)
+    work_df["beverageSales"] = pd.to_numeric(work_df["beverageSales"], errors="coerce").fillna(0)
+
+    zero_guest_df = work_df[work_df["guestCount"] == 0].copy()
+    if zero_guest_df.empty:
+        return pd.DataFrame()
+
+    grouped = (
+        zero_guest_df.groupby("serverName", dropna=False)
+        .agg(
+            zero_guest_check_count=("checkNumber", "count"),
+            zero_guest_sales=("netSales", "sum"),
+            zero_guest_beverage_sales=("beverageSales", "sum"),
+        )
+        .reset_index()
+    )
+
+    grouped["employee_id"] = (
+        grouped["serverName"]
+        .fillna("")
+        .apply(lambda x: stable_employee_id(store_id, day_str, x))
+    )
+    grouped["employee_name"] = grouped["serverName"]
+
+    return grouped[
+        [
+            "employee_id",
+            "employee_name",
+            "zero_guest_check_count",
+            "zero_guest_sales",
+            "zero_guest_beverage_sales",
         ]
     ]
 
@@ -357,9 +488,60 @@ def upsert_grouped_rows(conn, grouped_df, store_id, business_date):
         cur.close()
 
 
+def upsert_zero_guest_rows(conn, alerts_df, store_id, business_date):
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            DELETE FROM employee_zero_guest_alerts
+            WHERE store_number = %s
+              AND business_date = %s;
+            """,
+            (int(store_id), business_date),
+        )
+
+        for _, row in alerts_df.iterrows():
+            cur.execute(
+                """
+                INSERT INTO employee_zero_guest_alerts (
+                    store_number,
+                    business_date,
+                    employee_id,
+                    employee_name,
+                    zero_guest_check_count,
+                    zero_guest_sales,
+                    zero_guest_beverage_sales,
+                    updated_at
+                )
+                VALUES (%s,%s,%s,%s,%s,%s,%s,now())
+                ON CONFLICT (store_number, business_date, employee_id)
+                DO UPDATE SET
+                    employee_name = EXCLUDED.employee_name,
+                    zero_guest_check_count = EXCLUDED.zero_guest_check_count,
+                    zero_guest_sales = EXCLUDED.zero_guest_sales,
+                    zero_guest_beverage_sales = EXCLUDED.zero_guest_beverage_sales,
+                    updated_at = now();
+                """,
+                (
+                    int(store_id),
+                    business_date,
+                    int(row["employee_id"]),
+                    row["employee_name"],
+                    int(row["zero_guest_check_count"]),
+                    float(row["zero_guest_sales"]),
+                    float(row["zero_guest_beverage_sales"]),
+                ),
+            )
+
+        conn.commit()
+    finally:
+        cur.close()
+
+
 def main():
     print(f"Sync window: {start_date} to {end_date}")
     print(f"Max stores this run: {MAX_STORES_PER_RUN}")
+    print(f"Target store: {TARGET_STORE if TARGET_STORE is not None else 'all eligible stores'}")
     print(f"Request delay: {REQUEST_DELAY_SECONDS}s")
 
     conn = get_conn()
@@ -435,18 +617,24 @@ def main():
                 time.sleep(REQUEST_DELAY_SECONDS)
 
                 grouped = transform_checks(df, store_id, day_str)
-                if grouped.empty:
+                zero_guest_alerts = build_zero_guest_alerts(df, store_id, day_str)
+
+                if grouped.empty and zero_guest_alerts.empty:
                     print("    no usable grouped rows")
                     latest_synced_for_store = day
                     continue
 
-                upsert_grouped_rows(conn, grouped, store_id, day)
-                inserted = len(grouped)
-                total_rows += inserted
+                if not grouped.empty:
+                    upsert_grouped_rows(conn, grouped, store_id, day)
+                    inserted = len(grouped)
+                    total_rows += inserted
+                    print(f"    upserted {inserted} employee rows")
+                else:
+                    print("    no performance rows, zero-guest alerts only")
+
+                upsert_zero_guest_rows(conn, zero_guest_alerts, store_id, day)
                 total_store_days += 1
                 latest_synced_for_store = day
-
-                print(f"    upserted {inserted} employee rows")
 
             if latest_synced_for_store:
                 mark_progress(
