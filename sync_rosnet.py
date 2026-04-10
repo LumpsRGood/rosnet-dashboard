@@ -170,23 +170,19 @@ def select_stores_for_run(conn, target_date, max_stores):
                 (TARGET_STORE, target_date, max_stores),
             )
         else:
-            target_stores = (3231, 4445, 4456, 4463)
             cur.execute(
                 """
                 SELECT store_number, store_name, last_synced_date
                 FROM sync_progress
-                WHERE store_number IN %s
-                  AND (
-                      last_synced_date IS NULL
-                      OR last_synced_date < %s
-                  )
+                WHERE last_synced_date IS NULL
+                   OR last_synced_date < %s
                 ORDER BY
                     CASE WHEN last_synced_date IS NULL THEN 0 ELSE 1 END,
                     last_synced_date NULLS FIRST,
                     store_number
                 LIMIT %s;
                 """,
-                (target_stores, target_date, max_stores),
+                (target_date, max_stores),
             )
         return cur.fetchall()
     finally:

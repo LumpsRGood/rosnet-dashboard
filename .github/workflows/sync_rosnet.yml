@@ -2,16 +2,7 @@ name: Sync Rosnet to Supabase
 
 on:
   schedule:
-    - cron: "10 6 * * *"
-    - cron: "40 6 * * *"
-    - cron: "10 7 * * *"
-    - cron: "40 7 * * *"
-    - cron: "10 8 * * *"
-    - cron: "40 8 * * *"
-    - cron: "10 9 * * *"
-    - cron: "40 9 * * *"
-    - cron: "10 10 * * *"
-    - cron: "40 10 * * *"
+    - cron: "10-59/5 11-15 * * *"
   workflow_dispatch:
 
 env:
