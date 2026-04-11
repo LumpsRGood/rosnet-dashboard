@@ -266,7 +266,7 @@ def build_sync_bar_png(value: int, total: int, fill_color: str) -> bytes:
 def render_freshness_sidebar(target_date):
     summary = get_sync_status_summary(target_date)
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### Location Sync")
+    st.sidebar.markdown("<h3 style='text-align:center;'>Location Sync</h3>", unsafe_allow_html=True)
 
     if not summary["last_sync"]:
         st.sidebar.info("No sync data yet.")
@@ -291,7 +291,7 @@ def render_freshness_sidebar(target_date):
     )
 
     def render_status_row(label, value):
-        left, mid, right = st.sidebar.columns([1.35, 2.0, 0.8], gap="small")
+        left, mid, right = st.sidebar.columns([1.1, 2.2, 0.8], gap="small")
         left.markdown(f"**{label}**")
         fraction = 0.0 if total <= 0 else float(value) / float(total)
         mid.progress(fraction)
