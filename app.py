@@ -973,8 +973,14 @@ with logo_mid:
     except Exception:
         pass
 
-st.sidebar.caption("Peachtree Partners Data Analysis")
-st.sidebar.caption(APP_VERSION)
+st.sidebar.markdown(
+    "<div style='text-align:center; color:#b9b4bd; font-size:0.95rem;'>Peachtree Partners Data Analysis</div>",
+    unsafe_allow_html=True,
+)
+st.sidebar.markdown(
+    f"<div style='text-align:center; color:#b9b4bd; font-size:0.8rem; margin-top:-0.35rem;'>{APP_VERSION}</div>",
+    unsafe_allow_html=True,
+)
 
 try:
     tz = ZoneInfo("America/New_York")
