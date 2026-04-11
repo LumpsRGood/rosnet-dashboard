@@ -248,16 +248,26 @@ def render_freshness_sidebar(target_date):
         else "No successful sync yet"
     )
 
-    def render_status_row(label, value):
-        left, mid, right = st.sidebar.columns([1.7, 1.8, 0.9])
+    def progress_blocks(value, color_name):
+        if total <= 0:
+            filled = 0
+        else:
+            filled = round((value / total) * 8)
+        if value > 0:
+            filled = max(filled, 1)
+        filled = min(filled, 8)
+        empty = max(8 - filled, 0)
+        return f":{color_name}[{'█' * filled}]:gray[{'█' * empty}]"
+
+    def render_status_row(label, value, color_name):
+        left, mid, right = st.sidebar.columns([1.2, 2.4, 0.9])
         left.markdown(f"**{label}**")
-        fraction = 0.0 if total <= 0 else float(value) / float(total)
-        mid.progress(fraction)
+        mid.markdown(progress_blocks(value, color_name))
         right.markdown(f"**{value}/{total}**")
 
-    render_status_row("Current", current)
-    render_status_row("Behind", behind)
-    render_status_row("Failed", failed)
+    render_status_row("Current", current, "green")
+    render_status_row("Behind", behind, "orange")
+    render_status_row("Failed", failed, "red")
 
     st.sidebar.markdown("---")
     st.sidebar.caption("LAST GOOD BUSINESS DATE")
