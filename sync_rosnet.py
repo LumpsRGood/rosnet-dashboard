@@ -318,6 +318,7 @@ def transform_checks(df, store_id, day_str):
     if not dine_df.empty:
         dine_df["netSales"] = pd.to_numeric(dine_df["netSales"], errors="coerce").fillna(0)
         dine_df["beverageSales"] = pd.to_numeric(dine_df["beverageSales"], errors="coerce").fillna(0)
+        dine_df["guestCount"] = pd.to_numeric(dine_df["guestCount"], errors="coerce").fillna(0)
 
         if "openTime" in dine_df.columns and "closeTime" in dine_df.columns:
             dine_df["openTimeObj"] = pd.to_datetime(dine_df["openTime"], format="%H:%M:%S", errors="coerce")
@@ -331,16 +332,27 @@ def transform_checks(df, store_id, day_str):
         else:
             dine_df["turn_time"] = float("nan")
 
-        dine_grouped = (
+        sales_grouped = (
             dine_df.groupby("serverName", dropna=False)
             .agg(
                 dine_in_sales=("netSales", "sum"),
                 beverage_sales=("beverageSales", "sum"),
+            )
+            .reset_index()
+        )
+
+        # Rosnet turn-time reporting appears to exclude low-cover dine-in checks.
+        turn_df = dine_df[dine_df["guestCount"] >= 2].copy()
+        turn_grouped = (
+            turn_df.groupby("serverName", dropna=False)
+            .agg(
                 turn_time=("turn_time", "mean"),
                 check_count=("checkNumber", "count"),
             )
             .reset_index()
         )
+
+        dine_grouped = sales_grouped.merge(turn_grouped, on="serverName", how="left")
     else:
         dine_grouped = pd.DataFrame(
             columns=["serverName", "dine_in_sales", "beverage_sales", "turn_time", "check_count"]
