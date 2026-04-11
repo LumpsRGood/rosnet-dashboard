@@ -26,12 +26,12 @@ st.markdown(
     [data-testid="stSidebar"] .block-container {
         padding-top: 0;
     }
-    [data-testid="stSidebar"] [data-testid="stImage"] {
+    [data-testid="stSidebar"] [data-testid="stImage"]:first-of-type {
         margin-top: -2.1rem;
         margin-bottom: 0.15rem;
         text-align: center;
     }
-    [data-testid="stSidebar"] [data-testid="stImage"] img {
+    [data-testid="stSidebar"] [data-testid="stImage"]:first-of-type img {
         margin-left: auto;
         margin-right: auto;
     }
