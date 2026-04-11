@@ -17,6 +17,20 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+st.markdown(
+    """
+    <style>
+    [data-testid="stSidebar"] [data-testid="stSidebarContent"] {
+        padding-top: 0.6rem;
+    }
+    [data-testid="stSidebar"] .block-container {
+        padding-top: 0;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 
 # -----------------------------
 # DB
@@ -219,51 +233,28 @@ def render_freshness_sidebar(target_date):
     failed = summary["failed"]
     last_good_business_date = summary["last_good_business_date"]
 
-    def ratio(value):
-        return 0 if total <= 0 else max(0.0, min(float(value) / float(total), 1.0))
-
-    def status_row(label, value, color, pill_text):
-        fill_pct = max(ratio(value) * 100.0, 4.0 if value > 0 else 0.0)
-        return f"""
-        <div style="display:grid; grid-template-columns: 1fr 44%; gap:12px; align-items:center; margin:0 0 14px 0;">
-            <div style="display:flex; align-items:center; gap:10px; min-width:0;">
-                <span style="width:11px; height:11px; border-radius:999px; background:{color}; display:inline-block; flex:0 0 auto;"></span>
-                <span style="color:#f5f1e8; font-size:1rem;">{label} <strong style="font-weight:700;">{value}</strong></span>
-            </div>
-            <div style="height:18px; border-radius:999px; border:2px solid rgba(255,255,255,0.65); position:relative; overflow:hidden; background:rgba(255,255,255,0.06);">
-                <div style="width:{fill_pct:.1f}%; height:100%; background:{color}; border-radius:999px;"></div>
-                <span style="position:absolute; right:4px; top:50%; transform:translateY(-50%); padding:1px 8px; border-radius:999px; background:rgba(23,23,28,0.88); color:{color}; font-size:0.62rem; font-weight:700; letter-spacing:0.04em; text-transform:uppercase;">{pill_text}</span>
-            </div>
-        </div>
-        """
-
     last_good_label = (
         pd.to_datetime(last_good_business_date).strftime("%b %d, %Y")
         if pd.notna(last_good_business_date)
         else "No successful sync yet"
     )
 
-    panel_html = f"""
-    <div style="padding:4px 2px 2px 2px; margin-bottom:6px;">
-        <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:14px;">
-            <span style="color:#cfc6b8; font-size:0.9rem; font-weight:600; letter-spacing:0.02em;">Tracked Locations</span>
-            <span style="color:#f5f1e8; font-size:1.35rem; font-weight:800;">{total}</span>
-        </div>
-        {status_row("Current", current, "#4db35a", "Synced")}
-        {status_row("Behind", behind, "#d8a62b", "Pending")}
-        {status_row("Failed", failed, "#d5534f", "Review")}
-        <div style="height:1px; background:rgba(255,255,255,0.12); margin:18px 0 16px 0;"></div>
-        <div style="color:#aea596; font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:6px;">
-            Last Good Business Date
-        </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
-            <span style="color:#f5f1e8; font-size:1.35rem; font-weight:800; line-height:1.15;">{last_good_label}</span>
-            <span style="padding:4px 10px; border-radius:999px; background:rgba(77,179,90,0.18); color:#7fdd8b; font-size:0.72rem; font-weight:800; text-transform:uppercase; letter-spacing:0.05em; white-space:nowrap;">Synced</span>
-        </div>
-    </div>
-    """
+    header_left, header_right = st.sidebar.columns([3, 1])
+    header_left.caption("Tracked Locations")
+    header_right.markdown(f"**{total}**")
 
-    st.sidebar.markdown(panel_html, unsafe_allow_html=True)
+    def render_status_row(dot, label, value):
+        left, right = st.sidebar.columns([3, 1])
+        left.markdown(f"{dot} {label}")
+        right.markdown(f"**{value}**")
+
+    render_status_row("🟢", "Current", current)
+    render_status_row("🟡", "Behind", behind)
+    render_status_row("🔴", "Failed", failed)
+
+    st.sidebar.markdown("---")
+    st.sidebar.caption("LAST GOOD BUSINESS DATE")
+    st.sidebar.markdown(f"**{last_good_label}**")
     st.sidebar.caption(f"Last sync attempt: {last_sync_local.strftime('%I:%M %p %Z')}")
 
 # -----------------------------
@@ -927,12 +918,10 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
 # -----------------------------
 # SIDEBAR
 # -----------------------------
-logo_col1, logo_col2, logo_col3 = st.sidebar.columns([1, 1.2, 1])
-with logo_col2:
-    try:
-        st.image("logo.png", width=140)
-    except Exception:
-        pass
+try:
+    st.sidebar.image("logo.png", width=120)
+except Exception:
+    pass
 
 st.sidebar.caption("Peachtree Partners Data Analysis")
 st.sidebar.caption(APP_VERSION)
