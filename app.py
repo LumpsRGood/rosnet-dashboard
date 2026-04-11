@@ -268,7 +268,7 @@ def render_freshness_sidebar(target_date):
     st.sidebar.markdown("---")
     st.sidebar.markdown("### Location Sync")
     st.sidebar.markdown(
-        "<div style='margin-top:-0.45rem;'></div>",
+        "<div style='margin-top:-0.7rem; margin-bottom:-0.35rem;'></div>",
         unsafe_allow_html=True,
     )
 
@@ -295,7 +295,7 @@ def render_freshness_sidebar(target_date):
     )
 
     def render_status_row(label, value, fill_color):
-        left, mid, right = st.sidebar.columns([1.25, 2.15, 0.95])
+        left, mid, right = st.sidebar.columns([1.3, 2.35, 0.75], gap="small")
         left.markdown(f"**{label}**")
         mid.image(build_sync_bar_png(value, total, fill_color), use_container_width=True)
         right.markdown(f"**{value}/{total}**")
@@ -304,6 +304,10 @@ def render_freshness_sidebar(target_date):
     render_status_row("Behind", behind, "#f3c45a")
     render_status_row("Failed", failed, "#de5b57")
 
+    st.sidebar.markdown(
+        "<div style='margin-top:-0.25rem;'></div>",
+        unsafe_allow_html=True,
+    )
     st.sidebar.markdown("---")
     st.sidebar.caption("LAST GOOD BUSINESS DATE")
     st.sidebar.markdown(f"**{last_good_label}**")
