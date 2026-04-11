@@ -219,31 +219,46 @@ def render_freshness_sidebar(target_date):
     failed = summary["failed"]
     last_good_business_date = summary["last_good_business_date"]
 
+    def ratio(value):
+        return 0 if total <= 0 else max(0.0, min(float(value) / float(total), 1.0))
+
+    def status_row(label, value, color, pill_text):
+        fill_pct = max(ratio(value) * 100.0, 4.0 if value > 0 else 0.0)
+        return f"""
+        <div style="display:grid; grid-template-columns: 1fr 44%; gap:12px; align-items:center; margin:0 0 14px 0;">
+            <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+                <span style="width:11px; height:11px; border-radius:999px; background:{color}; display:inline-block; flex:0 0 auto;"></span>
+                <span style="color:#f5f1e8; font-size:1rem;">{label} <strong style="font-weight:700;">{value}</strong></span>
+            </div>
+            <div style="height:18px; border-radius:999px; border:2px solid rgba(255,255,255,0.65); position:relative; overflow:hidden; background:rgba(255,255,255,0.06);">
+                <div style="width:{fill_pct:.1f}%; height:100%; background:{color}; border-radius:999px;"></div>
+                <span style="position:absolute; right:4px; top:50%; transform:translateY(-50%); padding:1px 8px; border-radius:999px; background:rgba(23,23,28,0.88); color:{color}; font-size:0.62rem; font-weight:700; letter-spacing:0.04em; text-transform:uppercase;">{pill_text}</span>
+            </div>
+        </div>
+        """
+
+    last_good_label = (
+        pd.to_datetime(last_good_business_date).strftime("%b %d, %Y")
+        if pd.notna(last_good_business_date)
+        else "No successful sync yet"
+    )
+
     panel_html = f"""
-    <div style="border:1px solid #e2d7c3; border-radius:16px; padding:14px 16px; background:#fff9f0; margin-bottom:8px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-            <span style="font-size:0.95rem; color:#5a3e2b; font-weight:700;">Tracked Locations</span>
-            <span style="font-size:1rem; color:#3b2e22; font-weight:700;">{total}</span>
+    <div style="padding:4px 2px 2px 2px; margin-bottom:6px;">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:14px;">
+            <span style="color:#cfc6b8; font-size:0.9rem; font-weight:600; letter-spacing:0.02em;">Tracked Locations</span>
+            <span style="color:#f5f1e8; font-size:1.35rem; font-weight:800;">{total}</span>
         </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-            <span style="color:#3b2e22;">Current</span>
-            <span style="color:#2f9e44; font-weight:700;">{current}</span>
+        {status_row("Current", current, "#4db35a", "Synced")}
+        {status_row("Behind", behind, "#d8a62b", "Pending")}
+        {status_row("Failed", failed, "#d5534f", "Review")}
+        <div style="height:1px; background:rgba(255,255,255,0.12); margin:18px 0 16px 0;"></div>
+        <div style="color:#aea596; font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:6px;">
+            Last Good Business Date
         </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-            <span style="color:#3b2e22;">Behind</span>
-            <span style="color:#9a6b00; font-weight:700;">{behind}</span>
-        </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <span style="color:#3b2e22;">Failed</span>
-            <span style="color:#a12c21; font-weight:700;">{failed}</span>
-        </div>
-        <div style="border-top:1px solid #eadcc7; padding-top:12px;">
-            <div style="font-size:0.72rem; color:#8a6c4f; font-weight:700; text-transform:uppercase; letter-spacing:0.03em;">
-                Last Good Business Date
-            </div>
-            <div style="font-size:1.1rem; color:#3b2e22; font-weight:700; margin-top:4px;">
-                {pd.to_datetime(last_good_business_date).strftime('%b %d, %Y') if pd.notna(last_good_business_date) else 'No successful sync yet'}
-            </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+            <span style="color:#f5f1e8; font-size:1.35rem; font-weight:800; line-height:1.15;">{last_good_label}</span>
+            <span style="padding:4px 10px; border-radius:999px; background:rgba(77,179,90,0.18); color:#7fdd8b; font-size:0.72rem; font-weight:800; text-transform:uppercase; letter-spacing:0.05em; white-space:nowrap;">Synced</span>
         </div>
     </div>
     """
@@ -912,10 +927,12 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
 # -----------------------------
 # SIDEBAR
 # -----------------------------
-try:
-    st.sidebar.image("logo.png", use_container_width=True)
-except Exception:
-    pass
+logo_col1, logo_col2, logo_col3 = st.sidebar.columns([1, 1.2, 1])
+with logo_col2:
+    try:
+        st.image("logo.png", width=140)
+    except Exception:
+        pass
 
 st.sidebar.caption("Peachtree Partners Data Analysis")
 st.sidebar.caption(APP_VERSION)
