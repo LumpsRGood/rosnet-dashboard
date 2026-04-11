@@ -28,7 +28,7 @@ st.markdown(
     }
     [data-testid="stSidebar"] [data-testid="stImage"]:first-of-type {
         margin-top: -2.1rem;
-        margin-bottom: 0.15rem;
+        margin-bottom: -0.2rem;
         text-align: center;
     }
     [data-testid="stSidebar"] [data-testid="stImage"]:first-of-type img {
@@ -267,6 +267,10 @@ def render_freshness_sidebar(target_date):
     summary = get_sync_status_summary(target_date)
     st.sidebar.markdown("---")
     st.sidebar.markdown("### Location Sync")
+    st.sidebar.markdown(
+        "<div style='margin-top:-0.45rem;'></div>",
+        unsafe_allow_html=True,
+    )
 
     if not summary["last_sync"]:
         st.sidebar.info("No sync data yet.")
@@ -291,7 +295,7 @@ def render_freshness_sidebar(target_date):
     )
 
     def render_status_row(label, value, fill_color):
-        left, mid, right = st.sidebar.columns([1.2, 2.4, 0.9])
+        left, mid, right = st.sidebar.columns([1.25, 2.15, 0.95])
         left.markdown(f"**{label}**")
         mid.image(build_sync_bar_png(value, total, fill_color), use_container_width=True)
         right.markdown(f"**{value}/{total}**")
@@ -974,11 +978,11 @@ with logo_mid:
         pass
 
 st.sidebar.markdown(
-    "<div style='text-align:center; color:#b9b4bd; font-size:0.95rem;'>Peachtree Partners Data Analysis</div>",
+    "<div style='text-align:center; color:#b9b4bd; font-size:0.92rem; line-height:1.1;'>Peachtree Partners Data Analysis</div>",
     unsafe_allow_html=True,
 )
 st.sidebar.markdown(
-    f"<div style='text-align:center; color:#b9b4bd; font-size:0.8rem; margin-top:-0.35rem;'>{APP_VERSION}</div>",
+    f"<div style='text-align:center; color:#b9b4bd; font-size:0.76rem; margin-top:-0.45rem; margin-bottom:-0.15rem;'>{APP_VERSION}</div>",
     unsafe_allow_html=True,
 )
 
