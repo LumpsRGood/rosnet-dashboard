@@ -58,6 +58,58 @@ def get_location_map_from_db():
 
 
 @st.cache_data(ttl=120)
+def get_sync_status_summary(target_date):
+    conn = get_db_connection()
+    try:
+        df = pd.read_sql(
+            """
+            SELECT
+                COUNT(*) AS total_stores,
+                COUNT(*) FILTER (
+                    WHERE last_synced_date >= %s
+                ) AS current_stores,
+                COUNT(*) FILTER (
+                    WHERE COALESCE(last_status, '') NOT IN ('success', 'partial')
+                ) AS failed_stores,
+                MAX(last_attempted_at) AS last_attempted_at,
+                MAX(last_synced_date) FILTER (
+                    WHERE COALESCE(last_status, '') IN ('success', 'partial')
+                ) AS last_good_business_date
+            FROM sync_progress
+            """,
+            conn,
+            params=(target_date,),
+        )
+    finally:
+        conn.close()
+
+    if df.empty:
+        return {
+            "total": 0,
+            "current": 0,
+            "behind": 0,
+            "failed": 0,
+            "last_sync": None,
+            "last_good_business_date": None,
+        }
+
+    row = df.iloc[0]
+    total = int(row["total_stores"] or 0)
+    current = int(row["current_stores"] or 0)
+    failed = int(row["failed_stores"] or 0)
+    behind = max(total - current - failed, 0)
+
+    return {
+        "total": total,
+        "current": current,
+        "behind": behind,
+        "failed": failed,
+        "last_sync": row["last_attempted_at"],
+        "last_good_business_date": row["last_good_business_date"],
+    }
+
+
+@st.cache_data(ttl=120)
 def get_sync_status():
     conn = get_db_connection()
     try:
@@ -146,41 +198,58 @@ def get_zero_guest_alerts_from_db(start_date, end_date, locations=None):
 # -----------------------------
 # SIDEBAR FRESHNESS
 # -----------------------------
-def render_freshness_sidebar():
-    total, synced, last_sync = get_sync_status()
-
+def render_freshness_sidebar(target_date):
+    summary = get_sync_status_summary(target_date)
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### 📡 Data Freshness")
+    st.sidebar.markdown("### Location Sync")
 
-    if not last_sync:
-        st.sidebar.warning("No sync data yet")
+    if not summary["last_sync"]:
+        st.sidebar.info("No sync data yet.")
         return
 
     try:
         local_tz = ZoneInfo("America/Chicago")
-        last_sync_local = pd.to_datetime(last_sync, utc=True).tz_convert(local_tz)
+        last_sync_local = pd.to_datetime(summary["last_sync"], utc=True).tz_convert(local_tz)
     except Exception:
-        last_sync_local = pd.to_datetime(last_sync)
+        last_sync_local = pd.to_datetime(summary["last_sync"])
 
-    now = datetime.now(last_sync_local.tzinfo) if getattr(last_sync_local, "tzinfo", None) else datetime.now()
-    diff_minutes = (now - last_sync_local.to_pydatetime()).total_seconds() / 60
+    total = summary["total"]
+    current = summary["current"]
+    behind = summary["behind"]
+    failed = summary["failed"]
+    last_good_business_date = summary["last_good_business_date"]
 
-    if diff_minutes < 30:
-        label = "Fresh"
-        status_fn = st.sidebar.success
-    elif diff_minutes < 120:
-        label = "Delayed"
-        status_fn = st.sidebar.warning
-    else:
-        label = "Stale"
-        status_fn = st.sidebar.error
+    panel_html = f"""
+    <div style="border:1px solid #e2d7c3; border-radius:16px; padding:14px 16px; background:#fff9f0; margin-bottom:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <span style="font-size:0.95rem; color:#5a3e2b; font-weight:700;">Tracked Locations</span>
+            <span style="font-size:1rem; color:#3b2e22; font-weight:700;">{total}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <span style="color:#3b2e22;">Current</span>
+            <span style="color:#2f9e44; font-weight:700;">{current}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <span style="color:#3b2e22;">Behind</span>
+            <span style="color:#9a6b00; font-weight:700;">{behind}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <span style="color:#3b2e22;">Failed</span>
+            <span style="color:#a12c21; font-weight:700;">{failed}</span>
+        </div>
+        <div style="border-top:1px solid #eadcc7; padding-top:12px;">
+            <div style="font-size:0.72rem; color:#8a6c4f; font-weight:700; text-transform:uppercase; letter-spacing:0.03em;">
+                Last Good Business Date
+            </div>
+            <div style="font-size:1.1rem; color:#3b2e22; font-weight:700; margin-top:4px;">
+                {pd.to_datetime(last_good_business_date).strftime('%b %d, %Y') if pd.notna(last_good_business_date) else 'No successful sync yet'}
+            </div>
+        </div>
+    </div>
+    """
 
-    percent = (synced / total) if total > 0 else 0.0
-
-    status_fn(label)
-    st.sidebar.caption(f"Last Sync: {last_sync_local.strftime('%I:%M %p %Z')}")
-    st.sidebar.caption(f"Progress: {synced} / {total} stores")
-    st.sidebar.progress(percent)
+    st.sidebar.markdown(panel_html, unsafe_allow_html=True)
+    st.sidebar.caption(f"Last sync attempt: {last_sync_local.strftime('%I:%M %p %Z')}")
 
 # -----------------------------
 # DATA PREP
@@ -843,22 +912,13 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
 # -----------------------------
 # SIDEBAR
 # -----------------------------
-sidebar_col1, sidebar_col2, sidebar_col3 = st.sidebar.columns([1, 1.5, 1])
-with sidebar_col2:
-    try:
-        st.image("logo.png", use_container_width=True)
-    except Exception:
-        pass
+try:
+    st.sidebar.image("logo.png", use_container_width=True)
+except Exception:
+    pass
 
-st.sidebar.markdown(
-    "<p style='text-align: center; color: gray; font-size: 0.9em; margin-top: -10px;'>Peachtree Partners Data Analysis</p>",
-    unsafe_allow_html=True,
-)
-st.sidebar.markdown(
-    f"<p style='text-align: center; color: gray; font-size: 0.7em; margin-top: -15px;'>{APP_VERSION}</p>",
-    unsafe_allow_html=True,
-)
-st.sidebar.header("Filter Selections Below")
+st.sidebar.caption("Peachtree Partners Data Analysis")
+st.sidebar.caption(APP_VERSION)
 
 try:
     tz = ZoneInfo("America/New_York")
@@ -867,6 +927,22 @@ except Exception:
     today = datetime.now().date()
 
 yesterday = today - timedelta(days=1)
+
+with st.spinner("Loading Locations..."):
+    try:
+        loc_map = get_location_map_from_db()
+    except Exception as e:
+        st.sidebar.error(f"Could not load locations from database: {e}")
+        st.stop()
+
+location_options = list(loc_map.keys()) if loc_map else []
+
+selected_locations = st.sidebar.multiselect(
+    "Choose Your Location(s)",
+    options=location_options,
+    format_func=lambda x: f"{x} - {loc_map.get(x, 'Unknown')}",
+    default=[],
+)
 
 date_method = st.sidebar.radio(
     "Choose Your Timeframe",
@@ -904,27 +980,11 @@ else:
         st.sidebar.error("Real-time data is unavailable. Please adjust the Custom Date Range.")
         st.stop()
 
-st.sidebar.info(
-    f"Selected: **{start_date.strftime('%b %d, %Y')}** to **{end_date.strftime('%b %d, %Y')}**"
+st.sidebar.caption(
+    f"Selected: {start_date.strftime('%b %d, %Y')} to {end_date.strftime('%b %d, %Y')}"
 )
 
-with st.spinner("Loading Locations..."):
-    try:
-        loc_map = get_location_map_from_db()
-    except Exception as e:
-        st.sidebar.error(f"Could not load locations from database: {e}")
-        st.stop()
-
-location_options = list(loc_map.keys()) if loc_map else []
-
-selected_locations = st.sidebar.multiselect(
-    "Choose Your Location(s)",
-    options=location_options,
-    format_func=lambda x: f"{x} - {loc_map.get(x, 'Unknown')}",
-    default=[],
-)
-
-render_freshness_sidebar()
+render_freshness_sidebar(end_date)
 
 
 # -----------------------------
