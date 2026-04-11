@@ -291,8 +291,10 @@ def render_freshness_sidebar(target_date):
     )
 
     def render_status_row(label, value):
-        left, right = st.sidebar.columns([3, 1])
-        left.markdown(label)
+        left, mid, right = st.sidebar.columns([1.7, 1.8, 0.9])
+        left.markdown(f"**{label}**")
+        fraction = 0.0 if total <= 0 else float(value) / float(total)
+        mid.progress(fraction)
         right.markdown(f"**{value}/{total}**")
 
     render_status_row("Current", current)
