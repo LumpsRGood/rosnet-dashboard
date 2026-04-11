@@ -21,10 +21,19 @@ st.markdown(
     """
     <style>
     [data-testid="stSidebar"] [data-testid="stSidebarContent"] {
-        padding-top: 0.6rem;
+        padding-top: 0.15rem;
     }
     [data-testid="stSidebar"] .block-container {
         padding-top: 0;
+    }
+    [data-testid="stSidebar"] [data-testid="stImage"] {
+        margin-top: -0.9rem;
+        margin-bottom: 0.15rem;
+        text-align: center;
+    }
+    [data-testid="stSidebar"] [data-testid="stImage"] img {
+        margin-left: auto;
+        margin-right: auto;
     }
     </style>
     """,
@@ -243,14 +252,26 @@ def render_freshness_sidebar(target_date):
     header_left.caption("Tracked Locations")
     header_right.markdown(f"**{total}**")
 
-    def render_status_row(dot, label, value):
-        left, right = st.sidebar.columns([3, 1])
-        left.markdown(f"{dot} {label}")
-        right.markdown(f"**{value}**")
+    def progress_blocks(value, color_name):
+        if total <= 0:
+            filled = 0
+        else:
+            filled = round((value / total) * 8)
+        if value > 0:
+            filled = max(filled, 1)
+        filled = min(filled, 8)
+        empty = max(8 - filled, 0)
+        return f":{color_name}[{'█' * filled}]:gray[{'█' * empty}]"
 
-    render_status_row("🟢", "Current", current)
-    render_status_row("🟡", "Behind", behind)
-    render_status_row("🔴", "Failed", failed)
+    def render_status_row(dot, label, value, color_name):
+        left, mid, right = st.sidebar.columns([2.2, 0.7, 1.6])
+        left.markdown(f"{dot} {label}")
+        mid.markdown(f"**{value}**")
+        right.markdown(progress_blocks(value, color_name))
+
+    render_status_row("🟢", "Current", current, "green")
+    render_status_row("🟡", "Behind", behind, "orange")
+    render_status_row("🔴", "Failed", failed, "red")
 
     st.sidebar.markdown("---")
     st.sidebar.caption("LAST GOOD BUSINESS DATE")
