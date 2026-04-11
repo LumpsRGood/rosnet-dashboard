@@ -219,6 +219,48 @@ def get_zero_guest_alerts_from_db(start_date, end_date, locations=None):
 
 
 # -----------------------------
+# SIDEBAR VISUALS
+# -----------------------------
+def build_sync_bar_png(value: int, total: int, fill_color: str) -> bytes:
+    segments = 8
+    if total <= 0:
+        filled = 0
+    else:
+        filled = round((value / total) * segments)
+    if value > 0:
+        filled = max(filled, 1)
+    filled = min(filled, segments)
+
+    fig, ax = plt.subplots(figsize=(2.05, 0.18), dpi=200)
+    ax.set_xlim(0, segments)
+    ax.set_ylim(0, 1)
+    ax.axis("off")
+    fig.patch.set_alpha(0)
+    ax.set_facecolor("none")
+
+    gap = 0.08
+    width = 1 - gap
+    for i in range(segments):
+        color = fill_color if i < filled else "#c9c9cd"
+        ax.add_patch(
+            Rectangle(
+                (i + gap / 2, 0.08),
+                width,
+                0.84,
+                facecolor=color,
+                edgecolor="#b8b8bd",
+                linewidth=0.4,
+            )
+        )
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", bbox_inches="tight", pad_inches=0.01, transparent=True)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+# -----------------------------
 # SIDEBAR FRESHNESS
 # -----------------------------
 def render_freshness_sidebar(target_date):
@@ -248,26 +290,15 @@ def render_freshness_sidebar(target_date):
         else "No successful sync yet"
     )
 
-    def progress_blocks(value, filled_char):
-        if total <= 0:
-            filled = 0
-        else:
-            filled = round((value / total) * 8)
-        if value > 0:
-            filled = max(filled, 1)
-        filled = min(filled, 8)
-        empty = max(8 - filled, 0)
-        return (filled_char * filled) + ("⬜" * empty)
-
-    def render_status_row(label, value, filled_char):
+    def render_status_row(label, value, fill_color):
         left, mid, right = st.sidebar.columns([1.2, 2.4, 0.9])
         left.markdown(f"**{label}**")
-        mid.markdown(progress_blocks(value, filled_char))
+        mid.image(build_sync_bar_png(value, total, fill_color), use_container_width=True)
         right.markdown(f"**{value}/{total}**")
 
-    render_status_row("Current", current, "🟩")
-    render_status_row("Behind", behind, "🟨")
-    render_status_row("Failed", failed, "🟥")
+    render_status_row("Current", current, "#72d882")
+    render_status_row("Behind", behind, "#f3c45a")
+    render_status_row("Failed", failed, "#de5b57")
 
     st.sidebar.markdown("---")
     st.sidebar.caption("LAST GOOD BUSINESS DATE")
