@@ -248,26 +248,16 @@ def render_freshness_sidebar(target_date):
         else "No successful sync yet"
     )
 
-    def progress_blocks(value, color_name):
-        if total <= 0:
-            filled = 0
-        else:
-            filled = round((value / total) * 8)
-        if value > 0:
-            filled = max(filled, 1)
-        filled = min(filled, 8)
-        empty = max(8 - filled, 0)
-        return f":{color_name}[{'█' * filled}]:gray[{'█' * empty}]"
-
-    def render_status_row(label, value, color_name):
-        left, mid, right = st.sidebar.columns([1.8, 1.5, 0.9])
+    def render_status_row(label, value):
+        left, mid, right = st.sidebar.columns([1.7, 1.8, 0.9])
         left.markdown(f"**{label}**")
-        mid.markdown(progress_blocks(value, color_name))
+        fraction = 0.0 if total <= 0 else float(value) / float(total)
+        mid.progress(fraction)
         right.markdown(f"**{value}/{total}**")
 
-    render_status_row("Current", current, "green")
-    render_status_row("Behind", behind, "orange")
-    render_status_row("Failed", failed, "red")
+    render_status_row("Current", current)
+    render_status_row("Behind", behind)
+    render_status_row("Failed", failed)
 
     st.sidebar.markdown("---")
     st.sidebar.caption("LAST GOOD BUSINESS DATE")
@@ -935,10 +925,12 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
 # -----------------------------
 # SIDEBAR
 # -----------------------------
-try:
-    st.sidebar.image("logo.png", width=120)
-except Exception:
-    pass
+logo_left, logo_mid, logo_right = st.sidebar.columns([1, 1.6, 1])
+with logo_mid:
+    try:
+        st.image("logo.png", width=120)
+    except Exception:
+        pass
 
 st.sidebar.caption("Peachtree Partners Data Analysis")
 st.sidebar.caption(APP_VERSION)
