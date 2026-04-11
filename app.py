@@ -322,6 +322,7 @@ def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
         "check_count",
         "guest_count",
         "sales",
+        "dine_in_sales",
     ]
     for col in numeric_cols:
         if col in out.columns:
@@ -337,7 +338,6 @@ def prepare_display_df(df: pd.DataFrame) -> pd.DataFrame:
             "employee_name",
             "ppa",
             "beverage_pct",
-            "turn_time",
             "check_count",
             "guest_count",
             "sales",
@@ -387,7 +387,8 @@ def weighted_bev_pct(df: pd.DataFrame) -> float:
     if df.empty:
         return 0.0
 
-    total_sales = df["sales"].sum()
+    sales_col = "dine_in_sales" if "dine_in_sales" in df.columns else "sales"
+    total_sales = df[sales_col].sum()
     total_bev_sales = df["beverage_sales"].sum()
 
     return (total_bev_sales / total_sales * 100.0) if total_sales > 0 else 0.0
@@ -398,7 +399,14 @@ def aggregate_store_day_ppa(df: pd.DataFrame) -> float:
         return 0.0
     store_day = (
         df.groupby(["store_number", "business_date"], as_index=False)
-        .agg(ppa=("ppa", "first"))
+        .agg(
+            sales=("sales", "sum"),
+            guest_count=("guest_count", "sum"),
+        )
+    )
+    store_day["ppa"] = store_day.apply(
+        lambda r: (r["sales"] / r["guest_count"]) if r["guest_count"] > 0 else 0.0,
+        axis=1,
     )
     return float(store_day["ppa"].mean()) if not store_day.empty else 0.0
 
@@ -407,25 +415,39 @@ def build_server_summary(df: pd.DataFrame, zg_df: pd.DataFrame = None) -> pd.Dat
     if df.empty:
         return pd.DataFrame(columns=["employee_name", "turn_time", "beverage_pct", "ppa", "zero_checks"])
 
+    # Keep server leaderboard focused on dine-in service rows.
+    if "dine_in_sales" in df.columns:
+        display_df = df[(pd.to_numeric(df["dine_in_sales"], errors="coerce").fillna(0) > 0) | (df["turn_time"].notna())].copy()
+    else:
+        display_df = df.copy()
+
+    if display_df.empty:
+        return pd.DataFrame(columns=["employee_name", "turn_time", "beverage_pct", "ppa", "zero_checks"])
+
     grouped = (
-        df.groupby("employee_name", dropna=False)
+        display_df.groupby("employee_name", dropna=False)
         .agg(
             turn_time=("turn_time", "mean"),
             sales=("sales", "sum"),
-            ppa=("ppa", "mean"),
+            guest_count=("guest_count", "sum"),
+            dine_in_sales=("dine_in_sales", "sum") if "dine_in_sales" in display_df.columns else ("sales", "sum"),
         )
         .reset_index()
     )
 
     bev_source = (
-        df.groupby("employee_name", dropna=False)
+        display_df.groupby("employee_name", dropna=False)
         .agg(beverage_sales=("beverage_sales", "sum"))
         .reset_index()
     )
 
     grouped = grouped.merge(bev_source, on="employee_name", how="left")
+    grouped["ppa"] = grouped.apply(
+        lambda r: (r["sales"] / r["guest_count"]) if r["guest_count"] > 0 else 0.0,
+        axis=1,
+    )
     grouped["beverage_pct"] = grouped.apply(
-        lambda r: (r["beverage_sales"] / r["sales"] * 100.0) if r["sales"] > 0 else 0.0,
+        lambda r: (r["beverage_sales"] / r["dine_in_sales"] * 100.0) if r["dine_in_sales"] > 0 else 0.0,
         axis=1,
     )
 
@@ -506,6 +528,8 @@ def build_location_summary(df: pd.DataFrame, loc_map: dict) -> pd.DataFrame:
         .agg(
             turn_time=("turn_time", "mean"),
             sales=("sales", "sum"),
+            guest_count=("guest_count", "sum"),
+            dine_in_sales=("dine_in_sales", "sum") if "dine_in_sales" in df.columns else ("sales", "sum"),
         )
         .reset_index()
     )
@@ -516,20 +540,14 @@ def build_location_summary(df: pd.DataFrame, loc_map: dict) -> pd.DataFrame:
         .reset_index()
     )
 
-    ppa_source = (
-        df.groupby(["store_number", "business_date"], dropna=False)
-        .agg(ppa=("ppa", "first"))
-        .reset_index()
-        .groupby("store_number", dropna=False)
-        .agg(ppa=("ppa", "mean"))
-        .reset_index()
+    grouped = grouped.merge(bev_source, on="store_number", how="left")
+    grouped["ppa"] = grouped.apply(
+        lambda r: (r["sales"] / r["guest_count"]) if r["guest_count"] > 0 else 0.0,
+        axis=1,
     )
 
-    grouped = grouped.merge(bev_source, on="store_number", how="left")
-    grouped = grouped.merge(ppa_source, on="store_number", how="left")
-
     grouped["beverage_pct"] = grouped.apply(
-        lambda r: (r["beverage_sales"] / r["sales"] * 100.0) if r["sales"] > 0 else 0.0,
+        lambda r: (r["beverage_sales"] / r["dine_in_sales"] * 100.0) if r["dine_in_sales"] > 0 else 0.0,
         axis=1,
     )
     grouped["Location"] = grouped["store_number"].apply(

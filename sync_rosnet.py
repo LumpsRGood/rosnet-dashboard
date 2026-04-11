@@ -110,6 +110,12 @@ def ensure_tables(conn):
             ON employee_zero_guest_alerts (business_date, store_number);
             """
         )
+        cur.execute(
+            """
+            ALTER TABLE employee_daily_metrics
+            ADD COLUMN IF NOT EXISTS dine_in_sales numeric NOT NULL DEFAULT 0;
+            """
+        )
         conn.commit()
     finally:
         cur.close()
@@ -262,8 +268,6 @@ def transform_checks(df, store_id, day_str):
         "checkNumber",
         "netSales",
         "beverageSales",
-        "openTime",
-        "closeTime",
         "guestCount",
     }
     missing = required - set(df.columns)
@@ -271,28 +275,37 @@ def transform_checks(df, store_id, day_str):
         print(f"    skipped, missing columns: {sorted(missing)}")
         return pd.DataFrame()
 
-    df["guestCount"] = pd.to_numeric(df["guestCount"], errors="coerce").fillna(0)
-    df["netSales"] = pd.to_numeric(df["netSales"], errors="coerce").fillna(0)
-
-    # Calculate global PPA across ALL segments (Dine-In, Carry-Out, OLO, etc)
-    global_grouped = (
-        df.groupby("serverName", dropna=False)
-        .agg(
-            total_sales=("netSales", "sum"),
-            total_guest_count=("guestCount", "sum"),
-        ).reset_index()
-    )
-    global_grouped["ppa"] = global_grouped.apply(
-        lambda r: (r["total_sales"] / r["total_guest_count"]) if r["total_guest_count"] > 0 else 0.0, axis=1
-    )
-
-    # Now filter down strictly to Dine-In for the rest of the metrics (Turn Time, Bev %, Dine-in Sales)
-    df = filter_to_true_dine_in(df)
-    
-    if df.empty:
+    all_df = df.dropna(
+        subset=[
+            "serverName",
+            "checkNumber",
+            "netSales",
+            "guestCount",
+        ]
+    ).copy()
+    if all_df.empty:
         return pd.DataFrame()
 
-    df = df.dropna(
+    all_df["guestCount"] = pd.to_numeric(all_df["guestCount"], errors="coerce").fillna(0)
+    all_df["netSales"] = pd.to_numeric(all_df["netSales"], errors="coerce").fillna(0)
+
+    # Rosnet PPA is based on all-check sales and covers.
+    global_grouped = (
+        all_df.groupby("serverName", dropna=False)
+        .agg(
+            sales=("netSales", "sum"),
+            guest_count=("guestCount", "sum"),
+        )
+        .reset_index()
+    )
+    global_grouped["ppa"] = global_grouped.apply(
+        lambda r: (r["sales"] / r["guest_count"]) if r["guest_count"] > 0 else 0.0,
+        axis=1,
+    )
+
+    # Beverage/turn-time metrics remain dine-in scoped.
+    dine_df = filter_to_true_dine_in(df)
+    dine_df = dine_df.dropna(
         subset=[
             "serverName",
             "checkNumber",
@@ -302,45 +315,46 @@ def transform_checks(df, store_id, day_str):
         ]
     ).copy()
 
-    if df.empty:
-        return pd.DataFrame()
+    if not dine_df.empty:
+        dine_df["netSales"] = pd.to_numeric(dine_df["netSales"], errors="coerce").fillna(0)
+        dine_df["beverageSales"] = pd.to_numeric(dine_df["beverageSales"], errors="coerce").fillna(0)
 
-    if "openTime" in df.columns and "closeTime" in df.columns:
-        df["openTimeObj"] = pd.to_datetime(df["openTime"], format="%H:%M:%S", errors="coerce")
-        df["closeTimeObj"] = pd.to_datetime(df["closeTime"], format="%H:%M:%S", errors="coerce")
-        
-        df["turn_time"] = (df["closeTimeObj"] - df["openTimeObj"]).dt.total_seconds() / 60
-        df.loc[df["turn_time"] < 0, "turn_time"] += 24 * 60
-        
-        import numpy as np
-        df["turn_time"] = df["turn_time"].apply(lambda x: x if pd.notna(x) and x > 0 else np.nan)
-    else:
-        df["turn_time"] = float('nan')
+        if "openTime" in dine_df.columns and "closeTime" in dine_df.columns:
+            dine_df["openTimeObj"] = pd.to_datetime(dine_df["openTime"], format="%H:%M:%S", errors="coerce")
+            dine_df["closeTimeObj"] = pd.to_datetime(dine_df["closeTime"], format="%H:%M:%S", errors="coerce")
 
-    grouped = (
-        df.groupby("serverName", dropna=False)
-        .agg(
-            sales=("netSales", "sum"),
-            beverage_sales=("beverageSales", "sum"),
-            turn_time=("turn_time", "mean"),
-            check_count=("checkNumber", "count"),
-            guest_count=("guestCount", "sum"),
+            dine_df["turn_time"] = (dine_df["closeTimeObj"] - dine_df["openTimeObj"]).dt.total_seconds() / 60
+            dine_df.loc[dine_df["turn_time"] < 0, "turn_time"] += 24 * 60
+
+            import numpy as np
+            dine_df["turn_time"] = dine_df["turn_time"].apply(lambda x: x if pd.notna(x) and x > 0 else np.nan)
+        else:
+            dine_df["turn_time"] = float("nan")
+
+        dine_grouped = (
+            dine_df.groupby("serverName", dropna=False)
+            .agg(
+                dine_in_sales=("netSales", "sum"),
+                beverage_sales=("beverageSales", "sum"),
+                turn_time=("turn_time", "mean"),
+                check_count=("checkNumber", "count"),
+            )
+            .reset_index()
         )
-        .reset_index()
-    )
+    else:
+        dine_grouped = pd.DataFrame(
+            columns=["serverName", "dine_in_sales", "beverage_sales", "turn_time", "check_count"]
+        )
 
-    if grouped.empty:
-        return pd.DataFrame()
+    grouped = pd.merge(global_grouped, dine_grouped, on="serverName", how="left")
+    grouped["dine_in_sales"] = pd.to_numeric(grouped["dine_in_sales"], errors="coerce").fillna(0)
+    grouped["beverage_sales"] = pd.to_numeric(grouped["beverage_sales"], errors="coerce").fillna(0)
+    grouped["turn_time"] = pd.to_numeric(grouped["turn_time"], errors="coerce")
+    grouped["check_count"] = pd.to_numeric(grouped["check_count"], errors="coerce").fillna(0)
 
-
-    grouped = pd.merge(grouped, global_grouped[["serverName", "ppa"]], on="serverName", how="left")
-    grouped["ppa"] = grouped["ppa"].fillna(0.0)
-
-    grouped["beverage_pct"] = (
-        (grouped["beverage_sales"] / grouped["sales"])
-        .replace([pd.NA, pd.NaT], 0)
-        .fillna(0)
-        * 100
+    grouped["beverage_pct"] = grouped.apply(
+        lambda r: (r["beverage_sales"] / r["dine_in_sales"] * 100.0) if r["dine_in_sales"] > 0 else 0.0,
+        axis=1,
     )
 
     grouped["employee_id"] = (
@@ -357,6 +371,7 @@ def transform_checks(df, store_id, day_str):
             "ppa",
             "beverage_pct",
             "beverage_sales",
+            "dine_in_sales",
             "turn_time",
             "check_count",
             "guest_count",
@@ -435,6 +450,15 @@ def build_zero_guest_alerts(df, store_id, day_str):
 def upsert_grouped_rows(conn, grouped_df, store_id, business_date):
     cur = conn.cursor()
     try:
+        cur.execute(
+            """
+            DELETE FROM employee_daily_metrics
+            WHERE store_number = %s
+              AND business_date = %s;
+            """,
+            (int(store_id), business_date),
+        )
+
         for _, row in grouped_df.iterrows():
             cur.execute(
                 """
@@ -446,19 +470,21 @@ def upsert_grouped_rows(conn, grouped_df, store_id, business_date):
                     ppa,
                     beverage_pct,
                     beverage_sales,
+                    dine_in_sales,
                     turn_time,
                     check_count,
                     guest_count,
                     sales,
                     updated_at
                 )
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())
                 ON CONFLICT (store_number, business_date, employee_id)
                 DO UPDATE SET
                     employee_name = EXCLUDED.employee_name,
                     ppa = EXCLUDED.ppa,
                     beverage_pct = EXCLUDED.beverage_pct,
                     beverage_sales = EXCLUDED.beverage_sales,
+                    dine_in_sales = EXCLUDED.dine_in_sales,
                     turn_time = EXCLUDED.turn_time,
                     check_count = EXCLUDED.check_count,
                     guest_count = EXCLUDED.guest_count,
@@ -473,6 +499,7 @@ def upsert_grouped_rows(conn, grouped_df, store_id, business_date):
                     float(row["ppa"]),
                     float(row["beverage_pct"]),
                     float(row["beverage_sales"]),
+                    float(row["dine_in_sales"]),
                     float(row["turn_time"]),
                     float(row["check_count"]),
                     float(row["guest_count"]),
