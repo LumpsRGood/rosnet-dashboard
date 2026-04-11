@@ -27,7 +27,7 @@ st.markdown(
         padding-top: 0;
     }
     [data-testid="stSidebar"] [data-testid="stImage"] {
-        margin-top: -0.9rem;
+        margin-top: -2.1rem;
         margin-bottom: 0.15rem;
         text-align: center;
     }
@@ -248,10 +248,6 @@ def render_freshness_sidebar(target_date):
         else "No successful sync yet"
     )
 
-    header_left, header_right = st.sidebar.columns([3, 1])
-    header_left.caption("Tracked Locations")
-    header_right.markdown(f"**{total}**")
-
     def progress_blocks(value, color_name):
         if total <= 0:
             filled = 0
@@ -263,15 +259,15 @@ def render_freshness_sidebar(target_date):
         empty = max(8 - filled, 0)
         return f":{color_name}[{'█' * filled}]:gray[{'█' * empty}]"
 
-    def render_status_row(dot, label, value, color_name):
-        left, mid, right = st.sidebar.columns([2.2, 0.7, 1.6])
-        left.markdown(f"{dot} {label}")
-        mid.markdown(f"**{value}**")
-        right.markdown(progress_blocks(value, color_name))
+    def render_status_row(label, value, color_name):
+        left, mid, right = st.sidebar.columns([1.8, 1.5, 0.9])
+        left.markdown(f"**{label}**")
+        mid.markdown(progress_blocks(value, color_name))
+        right.markdown(f"**{value}/{total}**")
 
-    render_status_row("🟢", "Current", current, "green")
-    render_status_row("🟡", "Behind", behind, "orange")
-    render_status_row("🔴", "Failed", failed, "red")
+    render_status_row("Current", current, "green")
+    render_status_row("Behind", behind, "orange")
+    render_status_row("Failed", failed, "red")
 
     st.sidebar.markdown("---")
     st.sidebar.caption("LAST GOOD BUSINESS DATE")
