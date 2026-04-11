@@ -267,10 +267,6 @@ def render_freshness_sidebar(target_date):
     summary = get_sync_status_summary(target_date)
     st.sidebar.markdown("---")
     st.sidebar.markdown("### Location Sync")
-    st.sidebar.markdown(
-        "<div style='margin-top:-0.7rem; margin-bottom:-0.35rem;'></div>",
-        unsafe_allow_html=True,
-    )
 
     if not summary["last_sync"]:
         st.sidebar.info("No sync data yet.")
@@ -294,20 +290,14 @@ def render_freshness_sidebar(target_date):
         else "No successful sync yet"
     )
 
-    def render_status_row(label, value, fill_color):
-        left, mid, right = st.sidebar.columns([1.3, 2.35, 0.75], gap="small")
-        left.markdown(f"**{label}**")
-        mid.image(build_sync_bar_png(value, total, fill_color), use_container_width=True)
+    def render_status_row(label, value):
+        left, right = st.sidebar.columns([3, 1])
+        left.markdown(label)
         right.markdown(f"**{value}/{total}**")
 
-    render_status_row("Current", current, "#72d882")
-    render_status_row("Behind", behind, "#f3c45a")
-    render_status_row("Failed", failed, "#de5b57")
-
-    st.sidebar.markdown(
-        "<div style='margin-top:-0.25rem;'></div>",
-        unsafe_allow_html=True,
-    )
+    render_status_row("Current", current)
+    render_status_row("Behind", behind)
+    render_status_row("Failed", failed)
     st.sidebar.markdown("---")
     st.sidebar.caption("LAST GOOD BUSINESS DATE")
     st.sidebar.markdown(f"**{last_good_label}**")
