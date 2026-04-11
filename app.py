@@ -411,6 +411,21 @@ def aggregate_store_day_ppa(df: pd.DataFrame) -> float:
     return float(store_day["ppa"].mean()) if not store_day.empty else 0.0
 
 
+def weighted_turn_time(df: pd.DataFrame) -> float:
+    if df.empty or "turn_time" not in df.columns:
+        return 0.0
+
+    turn = pd.to_numeric(df["turn_time"], errors="coerce")
+    checks = pd.to_numeric(df.get("check_count", 0), errors="coerce").fillna(0)
+
+    valid = turn.notna() & (checks > 0)
+    if valid.any():
+        return float((turn[valid] * checks[valid]).sum() / checks[valid].sum())
+
+    turn = turn.dropna()
+    return float(turn.mean()) if not turn.empty else 0.0
+
+
 def build_server_summary(df: pd.DataFrame, zg_df: pd.DataFrame = None) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=["employee_name", "turn_time", "beverage_pct", "ppa", "zero_checks"])
@@ -427,10 +442,26 @@ def build_server_summary(df: pd.DataFrame, zg_df: pd.DataFrame = None) -> pd.Dat
     grouped = (
         display_df.groupby("employee_name", dropna=False)
         .agg(
-            turn_time=("turn_time", "mean"),
+            check_count=("check_count", "sum"),
             sales=("sales", "sum"),
             guest_count=("guest_count", "sum"),
             dine_in_sales=("dine_in_sales", "sum") if "dine_in_sales" in display_df.columns else ("sales", "sum"),
+        )
+        .reset_index()
+    )
+
+    weighted_turn = (
+        display_df.assign(
+            turn_time_value=pd.to_numeric(display_df["turn_time"], errors="coerce"),
+            turn_time_checks=pd.to_numeric(display_df["check_count"], errors="coerce").fillna(0),
+        )
+        .assign(
+            turn_time_numerator=lambda x: x["turn_time_value"].fillna(0) * x["turn_time_checks"]
+        )
+        .groupby("employee_name", dropna=False)
+        .agg(
+            turn_time_numerator=("turn_time_numerator", "sum"),
+            turn_time_check_count=("turn_time_checks", "sum"),
         )
         .reset_index()
     )
@@ -441,7 +472,13 @@ def build_server_summary(df: pd.DataFrame, zg_df: pd.DataFrame = None) -> pd.Dat
         .reset_index()
     )
 
+    grouped = grouped.merge(weighted_turn, on="employee_name", how="left")
     grouped = grouped.merge(bev_source, on="employee_name", how="left")
+    grouped["turn_time"] = grouped.apply(
+        lambda r: (r["turn_time_numerator"] / r["turn_time_check_count"])
+        if r["turn_time_check_count"] > 0 else 0.0,
+        axis=1,
+    )
     grouped["ppa"] = grouped.apply(
         lambda r: (r["sales"] / r["guest_count"]) if r["guest_count"] > 0 else 0.0,
         axis=1,
@@ -526,10 +563,24 @@ def build_location_summary(df: pd.DataFrame, loc_map: dict) -> pd.DataFrame:
     grouped = (
         df.groupby("store_number", dropna=False)
         .agg(
-            turn_time=("turn_time", "mean"),
+            check_count=("check_count", "sum"),
             sales=("sales", "sum"),
             guest_count=("guest_count", "sum"),
             dine_in_sales=("dine_in_sales", "sum") if "dine_in_sales" in df.columns else ("sales", "sum"),
+        )
+        .reset_index()
+    )
+
+    turn_source = (
+        df.assign(
+            turn_time_value=pd.to_numeric(df["turn_time"], errors="coerce"),
+            turn_time_checks=pd.to_numeric(df["check_count"], errors="coerce").fillna(0),
+        )
+        .assign(turn_time_numerator=lambda x: x["turn_time_value"].fillna(0) * x["turn_time_checks"])
+        .groupby("store_number", dropna=False)
+        .agg(
+            turn_time_numerator=("turn_time_numerator", "sum"),
+            turn_time_check_count=("turn_time_checks", "sum"),
         )
         .reset_index()
     )
@@ -540,7 +591,13 @@ def build_location_summary(df: pd.DataFrame, loc_map: dict) -> pd.DataFrame:
         .reset_index()
     )
 
+    grouped = grouped.merge(turn_source, on="store_number", how="left")
     grouped = grouped.merge(bev_source, on="store_number", how="left")
+    grouped["turn_time"] = grouped.apply(
+        lambda r: (r["turn_time_numerator"] / r["turn_time_check_count"])
+        if r["turn_time_check_count"] > 0 else 0.0,
+        axis=1,
+    )
     grouped["ppa"] = grouped.apply(
         lambda r: (r["sales"] / r["guest_count"]) if r["guest_count"] > 0 else 0.0,
         axis=1,
@@ -726,7 +783,7 @@ def render_zero_guest_alert_box(df: pd.DataFrame):
 def render_kpi_cards(df: pd.DataFrame, header_label: str):
     st.markdown(f"## {header_label}")
 
-    avg_turn = df["turn_time"].mean() if not df.empty else 0.0
+    avg_turn = weighted_turn_time(df)
     avg_bev = weighted_bev_pct(df)
     ppa = aggregate_store_day_ppa(df)
 
@@ -842,7 +899,7 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
 def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes:
     server_df = build_server_summary(raw_df).copy()
 
-    avg_turn = raw_df["turn_time"].mean() if not raw_df.empty else 0.0
+    avg_turn = weighted_turn_time(raw_df)
     avg_bev = weighted_bev_pct(raw_df)
     avg_ppa = aggregate_store_day_ppa(raw_df)
 
