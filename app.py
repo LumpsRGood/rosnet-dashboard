@@ -8,7 +8,7 @@ import psycopg2
 import streamlit as st
 from matplotlib.patches import Rectangle
 
-APP_VERSION = "v1.8.2"
+APP_VERSION = "v1.8.2.6"
 
 st.set_page_config(
     page_title="Peachtree Performance Dashboard",
@@ -1240,7 +1240,7 @@ with tab4:
                     ("+/- vs Previous Period", "IN PROGRESS", ""),
                     ("Trend Indicators (↑ ↓)", "PLANNED", ""),
                     ("Top & Bottom Movers", "PLANNED", ""),
-                    ("Enhanced WhatsApp Exports", "LIVE", "Now includes visual scorecards (v1.8.2)"),
+                    ("Enhanced WhatsApp Exports", "LIVE", "Now includes visual scorecards (v1.8.2.6)"),
                 ],
                 "#22c55e",
             ),
@@ -1252,7 +1252,7 @@ with tab4:
             roadmap_card(
                 "🧠 Smarter Insights",
                 [
-                    ("Ghost Check Tracking", "LIVE", "Deployed in Audit Sandbox (v1.8.2)"),
+                    ("Ghost Check Tracking", "LIVE", "Deployed in Audit Sandbox (v1.8.2.6)"),
                     ("Coaching Callouts", "PLANNED", ""),
                     ("Highlight Underperformers", "PLANNED", ""),
                     ("Server Search & Filters", "PLANNED", ""),
@@ -1272,7 +1272,7 @@ with tab4:
             roadmap_card(
                 "📈 Data Evolution",
                 [
-                    ("PPA True Accuracy", "LIVE", "All segments tracked correctly (v1.8.2)"),
+                    ("PPA True Accuracy", "LIVE", "All segments tracked correctly (v1.8.2.6)"),
                     ("WTD / MTD Comparisons", "PLANNED", ""),
                     ("Store Rank Movement", "PLANNED", ""),
                     ("Historical Trends", "PLANNED", ""),
@@ -1368,12 +1368,12 @@ with tab5:
                     (
                         "Dine-in Beverage % accuracy",
                         "RESOLVED",
-                        "Now isolated strictly to dine-in receipts (v1.8.2)"
+                        "Now isolated strictly to dine-in receipts (v1.8.2.6)"
                     ),
                     (
                         "PPA calculation consistency",
                         "RESOLVED",
-                        "True global PPA across all checks now live (v1.8.2)"
+                        "True global PPA across all checks now live (v1.8.2.6)"
                     ),
                 ],
                 "#ef4444",
