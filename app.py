@@ -951,13 +951,16 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
     ax.add_patch(Rectangle((0.015, 0.015), 0.97, 0.97, facecolor="#f3f4f6", edgecolor="#d1d5db", linewidth=1.2))
 
     ax.add_patch(Rectangle((0.02, 0.88), 0.96, 0.1, facecolor="#2c5aa0", edgecolor="#2c5aa0"))
-    ax.text(0.04, 0.94, title, fontsize=22, fontweight="bold", color="white", va="center")
+    ax.text(0.5, 0.94, title, fontsize=22, fontweight="bold", color="white", ha="center", va="center")
     ax.text(0.04, 0.905, subtitle, fontsize=13, color="#dbeafe", va="center", style="italic")
 
-    card_y = 0.62
-    card_h = 0.18
-    card_w = 0.22
-    x_positions = [0.04, 0.28, 0.52, 0.76]
+    card_y = 0.625
+    card_h = 0.145
+    card_w = 0.225
+    card_gap = 0.02
+    cards_total_w = card_w * 4 + card_gap * 3
+    card_start_x = (1.0 - cards_total_w) / 2
+    x_positions = [card_start_x + i * (card_w + card_gap) for i in range(4)]
 
     turn_fill_color, _ = format_turn_status(avg_turn)
     bev_fill_color, _ = format_bev_status(avg_bev)
@@ -995,24 +998,13 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
                 linewidth=1.2,
             )
         )
-        ax.add_patch(
-            FancyBboxPatch(
-                (x0 + 0.008, card_y + card_h - 0.05),
-                card_w - 0.016,
-                0.036,
-                boxstyle="round,pad=0.004,rounding_size=0.014",
-                facecolor=(1, 1, 1, 0.16),
-                edgecolor=(1, 1, 1, 0.0),
-                linewidth=0,
-            )
-        )
         cx = x0 + card_w / 2
-        ax.text(cx, card_y + 0.145, label, fontsize=9.2, fontweight="bold", color="#111827", ha="center", va="center")
-        ax.text(cx, card_y + 0.089, value, fontsize=22, fontweight="bold", color="#111827", ha="center", va="center")
+        ax.text(cx, card_y + 0.105, label, fontsize=9.2, fontweight="bold", color="white", ha="center", va="center")
+        ax.text(cx, card_y + 0.055, value, fontsize=22, fontweight="bold", color="#111827", ha="center", va="center")
         if line1:
-            ax.text(cx, card_y + 0.055, line1, fontsize=8.8, color="#111827", ha="center", va="center")
+            ax.text(cx, card_y + 0.028, line1, fontsize=8.8, color="#111827", ha="center", va="center")
         if line2:
-            ax.text(cx, card_y + 0.02, line2, fontsize=8.8, color="#111827", ha="center", va="center")
+            ax.text(cx, card_y + 0.012, line2, fontsize=8.8, color="#111827", ha="center", va="center")
 
     if total_servers:
         score_df = server_df.copy()
@@ -1057,8 +1049,8 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
     display_df["Dine In Bev %"] = display_df["Dine In Bev %"].map(lambda x: f"{x:.2f}%")
     display_df["PPA"] = display_df["PPA"].map(lambda x: f"${x:.2f}")
 
-    table_top = 0.58
-    table_width = 0.84
+    table_top = 0.585
+    table_width = 0.76
     table_left = (1.0 - table_width) / 2
     row_h = 0.033
     header_h = 0.04
