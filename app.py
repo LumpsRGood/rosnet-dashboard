@@ -967,7 +967,7 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
         ("TURN (DINE-IN)", f"{avg_turn:.2f}", "", "", turn_fill_color),
         ("BEV % (DINE-IN)", f"{avg_bev:.2f}%", "", "", bev_fill_color),
         ("PPA (ALL)", f"${avg_ppa:.2f}", "", "", ppa_fill),
-        ("ALL-GREEN (DINE-IN)", f"{all_green_count} of {total_servers}", "Turn ≤40m, Bev ≥19%, PPA ≥21", "", "#b160f0"),
+        ("ALL-GREEN (DINE-IN)", f"{all_green_count} of {total_servers}", "", "", "#b160f0"),
     ]
 
     for i, (label, value, line1, line2, color) in enumerate(card_specs):
@@ -1003,14 +1003,14 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
     def badge_for_server(name: str) -> str:
         badges = []
         if name == top_performer:
-            badges.append("🏆")
+            badges.append("[TOP]")
         if name == slowest:
-            badges.append("🐢")
+            badges.append("[SLOW]")
         row = server_df[server_df["employee_name"] == name]
         if not row.empty:
             r = row.iloc[0]
             if r["turn_time"] <= 40 and r["beverage_pct"] >= 19 and r["ppa"] >= 21:
-                badges.append("✅")
+                badges.append("[AG]")
         return " ".join(badges)
 
     display_df["Server"] = display_df["Server"].apply(
@@ -1085,7 +1085,7 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
         ax.text(x + 0.01, y + row_h / 2, row["PPA"], fontsize=10, fontweight="bold", color=text_color, ha="left", va="center")
 
     legend_y = y - 0.045
-    legend_text = "🏆 Top Performer    ✅ All Green    🐢 Slowest Turn"
+    legend_text = "[TOP] Top Performer    [AG] All Green    [SLOW] Slowest Turn"
     ax.text(
         0.5,
         legend_y,
