@@ -1,0 +1,48 @@
+name: Sync Priority Stores to Supabase
+
+on:
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: rosnet-priority-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run priority Rosnet sync
+        env:
+          ROSNET_API_USER: ${{ secrets.ROSNET_API_USER }}
+          ROSNET_API_KEY: ${{ secrets.ROSNET_API_KEY }}
+          ROSNET_CLIENT_ID: ${{ secrets.ROSNET_CLIENT_ID }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          SYNC_LOOKBACK_DAYS: ${{ secrets.SYNC_LOOKBACK_DAYS }}
+          MAX_STORES_PER_RUN: "4"
+          REQUEST_DELAY_SECONDS: ${{ secrets.REQUEST_DELAY_SECONDS }}
+          MAX_RATE_LIMIT_EVENTS: ${{ secrets.MAX_RATE_LIMIT_EVENTS }}
+          TARGET_STORES: "3231,4445,4456,4463"
+        run: |
+          python sync_rosnet.py

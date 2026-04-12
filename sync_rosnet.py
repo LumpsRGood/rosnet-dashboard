@@ -31,6 +31,12 @@ MAX_STORES_PER_RUN = int(max_stores_raw) if max_stores_raw and max_stores_raw.st
 
 target_store_raw = os.getenv("TARGET_STORE")
 TARGET_STORE = int(target_store_raw) if target_store_raw and target_store_raw.strip() else None
+target_stores_raw = os.getenv("TARGET_STORES", "")
+TARGET_STORES = tuple(
+    int(part.strip())
+    for part in target_stores_raw.split(",")
+    if part.strip()
+)
 
 request_delay_raw = os.getenv("REQUEST_DELAY_SECONDS")
 REQUEST_DELAY_SECONDS = float(request_delay_raw) if request_delay_raw and request_delay_raw.strip() else 3.0
@@ -157,7 +163,23 @@ def seed_sync_progress(conn, loc_map):
 def select_stores_for_run(conn, target_date, max_stores):
     cur = conn.cursor()
     try:
-        if TARGET_STORE is not None:
+        if TARGET_STORES:
+            placeholders = ",".join(["%s"] * len(TARGET_STORES))
+            cur.execute(
+                f"""
+                SELECT store_number, store_name, last_synced_date
+                FROM sync_progress
+                WHERE store_number IN ({placeholders})
+                  AND (last_synced_date IS NULL OR last_synced_date < %s)
+                ORDER BY
+                    CASE WHEN last_synced_date IS NULL THEN 0 ELSE 1 END,
+                    last_synced_date NULLS FIRST,
+                    store_number
+                LIMIT %s
+                """,
+                (*TARGET_STORES, target_date, max_stores),
+            )
+        elif TARGET_STORE is not None:
             cur.execute(
                 """
                 SELECT store_number, store_name, last_synced_date
@@ -576,7 +598,10 @@ def upsert_zero_guest_rows(conn, alerts_df, store_id, business_date):
 def main():
     print(f"Sync window: {start_date} to {end_date}")
     print(f"Max stores this run: {MAX_STORES_PER_RUN}")
-    print(f"Target store: {TARGET_STORE if TARGET_STORE is not None else 'all eligible stores'}")
+    if TARGET_STORES:
+        print(f"Target stores: {', '.join(str(s) for s in TARGET_STORES)}")
+    else:
+        print(f"Target store: {TARGET_STORE if TARGET_STORE is not None else 'all eligible stores'}")
     print(f"Request delay: {REQUEST_DELAY_SECONDS}s")
 
     conn = get_conn()
