@@ -633,6 +633,22 @@ def format_ppa_status(ppa: float):
     return "#ef4444", "#321717"
 
 
+def format_turn_status(turn: float):
+    if turn <= 40:
+        return "#21c55e", "#13281c"
+    if turn <= 45:
+        return "#eab308", "#2e270f"
+    return "#ef4444", "#321717"
+
+
+def format_bev_status(bev: float):
+    if bev >= 19:
+        return "#21c55e", "#13281c"
+    if bev >= 18:
+        return "#eab308", "#2e270f"
+    return "#ef4444", "#321717"
+
+
 def style_location_summary(df: pd.DataFrame):
     def color_turn(v):
         if pd.isna(v):
@@ -792,7 +808,8 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
 
     all_green = server_summary[
         (server_summary["turn_time"] <= 40) &
-        (server_summary["beverage_pct"] >= 19)
+        (server_summary["beverage_pct"] >= 19) &
+        (server_summary["ppa"] >= 21)
     ]
     all_green_count = len(all_green)
 
@@ -814,6 +831,8 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
     top_ppa = safe_name(top_ppa)
     bottom_ppa = safe_name(bottom_ppa)
 
+    turn_border, turn_bg = format_turn_status(avg_turn)
+    bev_border, bev_bg = format_bev_status(avg_bev)
     ppa_border, ppa_bg = format_ppa_status(ppa)
 
     cols = st.columns(4)
@@ -835,8 +854,8 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
     with cols[0]:
         st.markdown(
             f"""
-            <div style="border:1px solid #8a6d1f; background:#2f2918; {card_style_base}">
-                <div style="color:#f0b90b; {label_style}">TURN (DINE-IN)</div>
+            <div style="border:1px solid {turn_border}; background:{turn_bg}; {card_style_base}">
+                <div style="color:{turn_border}; {label_style}">TURN (DINE-IN)</div>
                 <div style="{value_style}">{avg_turn:.2f}</div>
                 <div style="{detail_style}">
                     <div>Best: <b>{best_turn}</b></div>
@@ -850,8 +869,8 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
     with cols[1]:
         st.markdown(
             f"""
-            <div style="border:1px solid #8d2b2b; background:#35191d; {card_style_base}">
-                <div style="color:#ff4b4b; {label_style}">BEV % (DINE-IN)</div>
+            <div style="border:1px solid {bev_border}; background:{bev_bg}; {card_style_base}">
+                <div style="color:{bev_border}; {label_style}">BEV % (DINE-IN)</div>
                 <div style="{value_style}">{avg_bev:.2f}%</div>
                 <div style="{detail_style}">
                     <div>Top: <b>{top_bev}</b></div>
@@ -884,7 +903,7 @@ def render_kpi_cards(df: pd.DataFrame, header_label: str):
                 <div style="color:#a855f7; {label_style}">ALL-GREEN (DINE-IN)</div>
                 <div style="{value_style}">{all_green_count} of {total_servers}</div>
                 <div style="{detail_style}">
-                    <div>Turn ≤40m & Bev ≥19%</div>
+                    <div>Turn ≤40m, Bev ≥19%, PPA ≥21</div>
                     <div>&nbsp;</div>
                 </div>
             </div>
@@ -905,7 +924,8 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
 
     all_green = server_df[
         (server_df["turn_time"] <= 40) &
-        (server_df["beverage_pct"] >= 19)
+        (server_df["beverage_pct"] >= 19) &
+        (server_df["ppa"] >= 21)
     ]
     all_green_count = len(all_green)
     total_servers = len(server_df)
@@ -946,13 +966,15 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
     card_w = 0.22
     x_positions = [0.04, 0.28, 0.52, 0.76]
 
-    ppa_fill = "#6fd08c" if avg_ppa >= 21 else "#f0d766" if avg_ppa >= 20 else "#f8696b"
+    turn_fill_color, _ = format_turn_status(avg_turn)
+    bev_fill_color, _ = format_bev_status(avg_bev)
+    ppa_fill, _ = format_ppa_status(avg_ppa)
 
     card_specs = [
-        ("TURN (DINE-IN)", f"{avg_turn:.2f}", f"Best: {best_turn}", f"Slow: {slowest_turn}", "#6fd08c"),
-        ("BEV % (DINE-IN)", f"{avg_bev:.2f}%", f"Top: {top_bev}", f"Bot: {bottom_bev}", "#f0d766"),
+        ("TURN (DINE-IN)", f"{avg_turn:.2f}", f"Best: {best_turn}", f"Slow: {slowest_turn}", turn_fill_color),
+        ("BEV % (DINE-IN)", f"{avg_bev:.2f}%", f"Top: {top_bev}", f"Bot: {bottom_bev}", bev_fill_color),
         ("PPA (ALL)", f"${avg_ppa:.2f}", f"Top: {top_ppa}", f"Bot: {bottom_ppa}", ppa_fill),
-        ("ALL-GREEN (DINE-IN)", f"{all_green_count} of {total_servers}", "Turn ≤40m & Bev ≥19%", "", "#b160f0"),
+        ("ALL-GREEN (DINE-IN)", f"{all_green_count} of {total_servers}", "Turn ≤40m, Bev ≥19%, PPA ≥21", "", "#b160f0"),
     ]
 
     for i, (label, value, line1, line2, color) in enumerate(card_specs):
