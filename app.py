@@ -12,7 +12,7 @@ APP_VERSION = "v1.8.2.6"
 
 st.set_page_config(
     page_title="Almost Live Rosnet Performance Dashboard",
-    page_icon="logo.png",
+    page_icon="favicon.png",
     layout="wide",
     initial_sidebar_state="expanded",
 )
