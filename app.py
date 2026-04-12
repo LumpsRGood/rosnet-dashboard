@@ -1155,7 +1155,7 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
 logo_left, logo_mid, logo_right = st.sidebar.columns([1, 1.6, 1])
 with logo_mid:
     try:
-        st.image("logo.png", width=120)
+        st.image("logo_dark.png", width=120)
     except Exception:
         pass
 
