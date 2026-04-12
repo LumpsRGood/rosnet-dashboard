@@ -952,12 +952,12 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
 
     ax.add_patch(Rectangle((0.02, 0.88), 0.96, 0.1, facecolor="#2c5aa0", edgecolor="#2c5aa0"))
     ax.text(0.5, 0.94, title, fontsize=22, fontweight="bold", color="white", ha="center", va="center")
-    ax.text(0.04, 0.905, subtitle, fontsize=13, color="#dbeafe", va="center", style="italic")
+    ax.text(0.5, 0.905, subtitle, fontsize=13, color="#dbeafe", ha="center", va="center", style="italic")
 
     card_y = 0.625
     card_h = 0.145
-    card_w = 0.225
-    card_gap = 0.02
+    card_w = 0.212
+    card_gap = 0.018
     cards_total_w = card_w * 4 + card_gap * 3
     card_start_x = (1.0 - cards_total_w) / 2
     x_positions = [card_start_x + i * (card_w + card_gap) for i in range(4)]
@@ -977,7 +977,7 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
         x0 = x_positions[i]
         ax.add_patch(
             FancyBboxPatch(
-                (x0 + 0.004, card_y - 0.006),
+                (x0 + 0.003, card_y - 0.005),
                 card_w,
                 card_h,
                 boxstyle="round,pad=0.008,rounding_size=0.02",
@@ -1050,13 +1050,13 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
     display_df["PPA"] = display_df["PPA"].map(lambda x: f"${x:.2f}")
 
     table_top = 0.585
-    table_width = 0.76
+    table_width = 0.86
     table_left = (1.0 - table_width) / 2
     row_h = 0.033
     header_h = 0.04
 
     cols = ["Server", "Turn Time", "Dine In Bev %", "PPA"]
-    col_widths = [0.42, 0.18, 0.22, 0.10]
+    col_widths = [0.46, 0.20, 0.22, 0.12]
 
     y = table_top
     x = table_left
