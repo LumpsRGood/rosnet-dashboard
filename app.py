@@ -1240,7 +1240,7 @@ render_freshness_sidebar(end_date)
 # -----------------------------
 st.title("*Almost* Live Rosnet Turn and Beverage Data 📈")
 st.warning(
-    "🚧 **Under Development:** This dashboard is currently in active testing. Errors may occasionally occur. Please contact **Chad** with any issues, feedback, or UI suggestions."
+    "🚧 **Under Development:** This dashboard is still in active testing, so you may occasionally see errors or incomplete data. Please [contact us](https://forms.office.com/r/nxpEmLbk3D) with any issues, feedback, or UI suggestions."
 )
 
 active_locations = selected_locations if selected_locations else None
