@@ -1349,6 +1349,7 @@ with tab3:
         colors = {
             "LIVE": "#22c55e",
             "IN PROGRESS": "#f59e0b",
+            "DELAYED": "#ef4444",
             "PLANNED": "#64748b",
         }
         color = colors.get(label, "#64748b")
@@ -1398,8 +1399,8 @@ with tab3:
             roadmap_card(
                 "🔥 Next Up",
                 [
-                    ("+/- vs Previous Period", "IN PROGRESS", ""),
-                    ("Trend Indicators (↑ ↓)", "PLANNED", ""),
+                    ("+/- vs Previous Period", "DELAYED", ""),
+                    ("Trend Indicators (↑ ↓)", "IN PROGRESS", ""),
                     ("Top & Bottom Movers", "PLANNED", ""),
                     ("Enhanced WhatsApp Exports", "LIVE", "Now includes visual scorecards (v1.8.2.6)"),
                 ],
@@ -1554,8 +1555,8 @@ with tab4:
                     ),
                     (
                         "Sync completeness visibility",
-                        "IN PROGRESS",
-                        "Freshness indicator added, expanding to store-level diagnostics"
+                        "MITIGATED",
+                        "Freshness indicator now surfaces store sync state more clearly"
                     ),
                     (
                         "Cross-day aggregation edge cases",
