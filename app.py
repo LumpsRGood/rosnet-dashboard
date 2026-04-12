@@ -947,7 +947,7 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
     ).copy()
 
     rows = len(display_df)
-    fig_height = max(11, 4.0 + rows * 0.38)
+    fig_height = max(7.6, 3.7 + rows * 0.34)
 
     fig, ax = plt.subplots(figsize=(8.3, fig_height), dpi=200)
     ax.set_xlim(0, 1)
@@ -990,8 +990,8 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
     display_df["PPA"] = display_df["PPA"].map(lambda x: f"${x:.2f}")
 
     table_top = 0.58
-    table_left = 0.04
-    table_width = 0.92
+    table_width = 0.84
+    table_left = (1.0 - table_width) / 2
     row_h = 0.033
     header_h = 0.04
 
