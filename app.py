@@ -723,28 +723,31 @@ def style_server_summary(df: pd.DataFrame):
             return "color: #4b5563;"
         return "background-color: #f8696b; color: white; font-weight: bold;"
 
-    display_df = df.rename(
-        columns={
-            "employee_name": "Server",
-            "turn_time": "Turn Time",
-            "beverage_pct": "Dine In Bev %",
-            "ppa": "PPA",
-            "zero_checks": "Ghost Checks"
-        }
-    )
+    rename_map = {
+        "employee_name": "Server",
+        "turn_time": "Turn Time",
+        "beverage_pct": "Dine In Bev %",
+        "ppa": "PPA",
+    }
+    if "zero_checks" in df.columns:
+        rename_map["zero_checks"] = "Ghost Checks"
 
-    styler = display_df.style.format(
-        {
-            "Turn Time": "{:.2f}",
-            "Dine In Bev %": "{:.2f}%",
-            "PPA": "${:.2f}",
-            "Ghost Checks": "{:.0f}"
-        }
-    )
+    display_df = df.rename(columns=rename_map)
+
+    format_map = {
+        "Turn Time": "{:.2f}",
+        "Dine In Bev %": "{:.2f}%",
+        "PPA": "${:.2f}",
+    }
+    if "Ghost Checks" in display_df.columns:
+        format_map["Ghost Checks"] = "{:.0f}"
+
+    styler = display_df.style.format(format_map)
     styler = styler.map(color_turn, subset=["Turn Time"])
     styler = styler.map(color_bev, subset=["Dine In Bev %"])
     styler = styler.map(color_ppa, subset=["PPA"])
-    styler = styler.map(color_zero_checks, subset=["Ghost Checks"])
+    if "Ghost Checks" in display_df.columns:
+        styler = styler.map(color_zero_checks, subset=["Ghost Checks"])
     return styler
 
 
