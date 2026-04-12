@@ -11,8 +11,8 @@ from matplotlib.patches import FancyBboxPatch, Rectangle
 APP_VERSION = "v1.8.2.6"
 
 st.set_page_config(
-    page_title="Peachtree Performance Dashboard",
-    page_icon="📈",
+    page_title="Almost Live Rosnet Performance Dashboard",
+    page_icon="logo.png",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -1238,7 +1238,7 @@ render_freshness_sidebar(end_date)
 # -----------------------------
 # MAIN DATA LOAD
 # -----------------------------
-st.title("*Almost* Live Rosnet Turn and Beverage Data 📈")
+st.title("*Almost* Live Rosnet Performance Dashboard")
 st.warning(
     "🚧 **Under Development:** This dashboard is still in active testing, so you may occasionally see errors or incomplete data. Please [contact us](https://forms.office.com/r/nxpEmLbk3D) with any issues, feedback, or UI suggestions."
 )
