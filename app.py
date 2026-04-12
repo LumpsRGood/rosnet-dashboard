@@ -7,7 +7,10 @@ import pandas as pd
 import psycopg2
 import streamlit as st
 from matplotlib.patches import FancyBboxPatch, Rectangle
-from streamlit_theme_provider import streamlit_theme_provider
+try:
+    from streamlit_theme_provider import streamlit_theme_provider
+except Exception:
+    streamlit_theme_provider = None
 
 APP_VERSION = "v1.8.2.6"
 
@@ -41,7 +44,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-active_theme = streamlit_theme_provider()
+active_theme = streamlit_theme_provider() if callable(streamlit_theme_provider) else None
 is_dark_theme = True
 if isinstance(active_theme, dict):
     base_theme = str(active_theme.get("base", "")).lower()
