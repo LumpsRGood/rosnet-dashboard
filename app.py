@@ -1415,7 +1415,7 @@ with tab3:
                 "🧠 Smarter Insights",
                 [
                     ("Ghost Check Tracking", "LIVE", "Deployed in Audit Sandbox (v1.8.2.6)"),
-                    ("Coaching Callouts", "PLANNED", ""),
+                    ("Coaching Callouts", "LIVE", "WhatsApp badges now highlight top, all-green, coach, and slowest turn"),
                     ("Highlight Underperformers", "PLANNED", ""),
                     ("Server Search & Filters", "PLANNED", ""),
                     ("Minimum Check Threshold", "PLANNED", ""),
