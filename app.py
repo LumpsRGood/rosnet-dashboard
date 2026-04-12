@@ -930,13 +930,6 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
     all_green_count = len(all_green)
     total_servers = len(server_df)
 
-    best_turn = server_df.loc[server_df["turn_time"].idxmin(), "employee_name"] if total_servers else "N/A"
-    slowest_turn = server_df.loc[server_df["turn_time"].idxmax(), "employee_name"] if total_servers else "N/A"
-    top_bev = server_df.loc[server_df["beverage_pct"].idxmax(), "employee_name"] if total_servers else "N/A"
-    bottom_bev = server_df.loc[server_df["beverage_pct"].idxmin(), "employee_name"] if total_servers else "N/A"
-    top_ppa = server_df.loc[server_df["ppa"].idxmax(), "employee_name"] if total_servers else "N/A"
-    bottom_ppa = server_df.loc[server_df["ppa"].idxmin(), "employee_name"] if total_servers else "N/A"
-
     display_df = server_df.rename(
         columns={
             "employee_name": "Server",
@@ -971,9 +964,9 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
     ppa_fill, _ = format_ppa_status(avg_ppa)
 
     card_specs = [
-        ("TURN (DINE-IN)", f"{avg_turn:.2f}", f"Best: {best_turn}", f"Slow: {slowest_turn}", turn_fill_color),
-        ("BEV % (DINE-IN)", f"{avg_bev:.2f}%", f"Top: {top_bev}", f"Bot: {bottom_bev}", bev_fill_color),
-        ("PPA (ALL)", f"${avg_ppa:.2f}", f"Top: {top_ppa}", f"Bot: {bottom_ppa}", ppa_fill),
+        ("TURN (DINE-IN)", f"{avg_turn:.2f}", "", "", turn_fill_color),
+        ("BEV % (DINE-IN)", f"{avg_bev:.2f}%", "", "", bev_fill_color),
+        ("PPA (ALL)", f"${avg_ppa:.2f}", "", "", ppa_fill),
         ("ALL-GREEN (DINE-IN)", f"{all_green_count} of {total_servers}", "Turn ≤40m, Bev ≥19%, PPA ≥21", "", "#b160f0"),
     ]
 
@@ -981,9 +974,48 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
         ax.add_patch(Rectangle((x_positions[i], card_y), card_w, card_h, facecolor=color, edgecolor="#cbd5e1", linewidth=1.2))
         ax.text(x_positions[i] + 0.012, card_y + 0.15, label, fontsize=10, fontweight="bold", color="#111827", va="center")
         ax.text(x_positions[i] + 0.012, card_y + 0.10, value, fontsize=21, fontweight="bold", color="#111827", va="center")
-        ax.text(x_positions[i] + 0.012, card_y + 0.055, line1, fontsize=9.5, color="#111827", va="center")
+        if line1:
+            ax.text(x_positions[i] + 0.012, card_y + 0.055, line1, fontsize=9.5, color="#111827", va="center")
         if line2:
             ax.text(x_positions[i] + 0.012, card_y + 0.02, line2, fontsize=9.5, color="#111827", va="center")
+
+    if total_servers:
+        score_df = server_df.copy()
+        score_df["all_green_flag"] = (
+            (score_df["turn_time"] <= 40) &
+            (score_df["beverage_pct"] >= 19) &
+            (score_df["ppa"] >= 21)
+        )
+        score_df["turn_rank"] = score_df["turn_time"].rank(method="min", ascending=True)
+        score_df["bev_rank"] = score_df["beverage_pct"].rank(method="min", ascending=False)
+        score_df["ppa_rank"] = score_df["ppa"].rank(method="min", ascending=False)
+        score_df["overall_rank"] = score_df["turn_rank"] + score_df["bev_rank"] + score_df["ppa_rank"]
+
+        top_performer = score_df.sort_values(
+            ["all_green_flag", "overall_rank", "turn_time", "beverage_pct", "ppa"],
+            ascending=[False, True, True, False, False],
+        ).iloc[0]["employee_name"]
+        slowest = score_df.loc[score_df["turn_time"].idxmax(), "employee_name"]
+    else:
+        top_performer = None
+        slowest = None
+
+    def badge_for_server(name: str) -> str:
+        badges = []
+        if name == top_performer:
+            badges.append("🏆")
+        if name == slowest:
+            badges.append("🐢")
+        row = server_df[server_df["employee_name"] == name]
+        if not row.empty:
+            r = row.iloc[0]
+            if r["turn_time"] <= 40 and r["beverage_pct"] >= 19 and r["ppa"] >= 21:
+                badges.append("✅")
+        return " ".join(badges)
+
+    display_df["Server"] = display_df["Server"].apply(
+        lambda name: f"{badge_for_server(name)} {name}".strip()
+    )
 
     display_df["Turn Time"] = display_df["Turn Time"].map(lambda x: f"{x:.2f}")
     display_df["Dine In Bev %"] = display_df["Dine In Bev %"].map(lambda x: f"{x:.2f}%")
@@ -1051,6 +1083,19 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
         fill, text_color = ppa_fill_func(row["PPA"])
         ax.add_patch(Rectangle((x, y), col_widths[3] * table_width, row_h, facecolor=fill, edgecolor="#d1d5db", linewidth=1.0))
         ax.text(x + 0.01, y + row_h / 2, row["PPA"], fontsize=10, fontweight="bold", color=text_color, ha="left", va="center")
+
+    legend_y = y - 0.045
+    legend_text = "🏆 Top Performer    ✅ All Green    🐢 Slowest Turn"
+    ax.text(
+        0.5,
+        legend_y,
+        legend_text,
+        fontsize=10,
+        color="#374151",
+        ha="center",
+        va="center",
+        fontweight="bold",
+    )
 
     buf = io.BytesIO()
     plt.tight_layout()
