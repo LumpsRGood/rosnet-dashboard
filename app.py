@@ -1276,10 +1276,9 @@ if df.empty:
 # -----------------------------
 # TABS
 # -----------------------------
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📊 Overview",
     "👨‍🍳 Server Performance",
-    "⚠️ Audit & Compliance",
     "🚀 Coming Attractions",
     "🆘 Known Gremlins",
     "🧾 Dataset"
@@ -1318,13 +1317,7 @@ with tab2:
 
             render_kpi_cards(loc_df, header_label="STORE TOTAL")
 
-            server_df = build_server_summary(loc_df, zero_guest_df[zero_guest_df["store_number"] == int(loc)])
-            loc_zero_guest_df = build_zero_guest_alert_summary(
-                zero_guest_df[zero_guest_df["store_number"] == int(loc)].copy()
-            )
-
-            if not loc_zero_guest_df.empty:
-                render_zero_guest_alert_box(loc_zero_guest_df)
+            server_df = build_server_summary(loc_df).drop(columns=["zero_checks"], errors="ignore")
 
             st.dataframe(
                 style_server_summary(server_df),
@@ -1346,24 +1339,6 @@ with tab2:
             )
 
 with tab3:
-    st.markdown("## ⚠️ Audit & Compliance")
-    st.markdown("The Manager's Coaching Sandbox. Track adherence and catch bad habits before they ruin your data.")
-    
-    st.markdown("### Coming Soon to this Tab:")
-    
-    def coming_soon_card(title, description):
-        return f"""
-        <div style="border:1px solid #475569; border-radius:12px; padding:20px; background:rgba(255,255,255,0.03); margin-bottom:15px;">
-            <div style="font-size:16px; font-weight:700; color:#f8fafc; margin-bottom:6px;">{title}</div>
-            <div style="font-size:14px; color:#94a3b8; line-height:1.5;">{description}</div>
-        </div>
-        """
-    
-    st.markdown(coming_soon_card("📈 30-Day Ghost Check Trends", "A line graph showing exactly how many 0-cover checks your team is ringing up over the month so you can spot failing habits visually."), unsafe_allow_html=True)
-    st.markdown(coming_soon_card("🚨 Repeat Offender Leaderboard", "A dedicated ranking of which servers are artificially inflating their PPA the most, measuring the exact dollar amount of 'invisible PPA' they are causing."), unsafe_allow_html=True)
-    st.markdown(coming_soon_card("⏱️ 'Campers' & Phantom Tables", "Alerts for checks that stay open suspiciously long (or short) to catch unclosed tickets messing up your Turn Time metric."), unsafe_allow_html=True)
-
-with tab4:
     st.markdown("## 🚀 Coming Attractions")
     st.markdown("What’s cooking behind the scenes...")
 
@@ -1487,7 +1462,7 @@ with tab4:
         unsafe_allow_html=True,
     )
 
-with tab5:
+with tab4:
     st.markdown("## 🆘 Known Gremlins")
     st.markdown("Tracking known issues, accuracy gaps, and active fixes in real time.")
 
@@ -1652,7 +1627,7 @@ with tab5:
         unsafe_allow_html=True,
     )
 
-with tab6:
+with tab5:
     st.markdown("### Combined Stored Dataset")
     st.markdown("Raw diagnostic data view. This tab will be removed in a future update.")
     st.dataframe(df, use_container_width=True, height=600)
