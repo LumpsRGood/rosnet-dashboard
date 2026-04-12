@@ -1041,7 +1041,7 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
             return ("ALL GREEN", "#22c55e", "#111827")
         if name == slowest:
             return ("SLOWEST TURN", "#ef4444", "white")
-        if misses >= 2:
+        if misses >= 3:
             return ("COACH", "#eab308", "#111827")
         return None
 
