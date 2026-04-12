@@ -967,17 +967,18 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
         ("TURN (DINE-IN)", f"{avg_turn:.2f}", "", "", turn_fill_color),
         ("BEV % (DINE-IN)", f"{avg_bev:.2f}%", "", "", bev_fill_color),
         ("PPA (ALL)", f"${avg_ppa:.2f}", "", "", ppa_fill),
-        ("ALL-GREEN (DINE-IN)", f"{all_green_count} of {total_servers}", "", "", "#b160f0"),
+        ("ALL GREEN", f"{all_green_count} of {total_servers}", "", "", "#b160f0"),
     ]
 
     for i, (label, value, line1, line2, color) in enumerate(card_specs):
         ax.add_patch(Rectangle((x_positions[i], card_y), card_w, card_h, facecolor=color, edgecolor="#cbd5e1", linewidth=1.2))
-        ax.text(x_positions[i] + 0.012, card_y + 0.15, label, fontsize=10, fontweight="bold", color="#111827", va="center")
-        ax.text(x_positions[i] + 0.012, card_y + 0.10, value, fontsize=21, fontweight="bold", color="#111827", va="center")
+        cx = x_positions[i] + card_w / 2
+        ax.text(cx, card_y + 0.15, label, fontsize=9.5, fontweight="bold", color="#111827", ha="center", va="center")
+        ax.text(cx, card_y + 0.10, value, fontsize=20, fontweight="bold", color="#111827", ha="center", va="center")
         if line1:
-            ax.text(x_positions[i] + 0.012, card_y + 0.055, line1, fontsize=9.5, color="#111827", va="center")
+            ax.text(cx, card_y + 0.055, line1, fontsize=8.8, color="#111827", ha="center", va="center")
         if line2:
-            ax.text(x_positions[i] + 0.012, card_y + 0.02, line2, fontsize=9.5, color="#111827", va="center")
+            ax.text(cx, card_y + 0.02, line2, fontsize=8.8, color="#111827", ha="center", va="center")
 
     if total_servers:
         score_df = server_df.copy()
@@ -1009,13 +1010,13 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
         misses = int(r["turn_time"] > 40) + int(r["beverage_pct"] < 19) + int(r["ppa"] < 21)
 
         if name == top_performer:
-            return ("TOP", "#8b5cf6", "white")
+            return ("TOP PERFORMER", "#8b5cf6", "white")
         if r["turn_time"] <= 40 and r["beverage_pct"] >= 19 and r["ppa"] >= 21:
             return ("ALL GREEN", "#22c55e", "#111827")
-        if misses >= 2:
-            return ("COACH", "#eab308", "#111827")
         if name == slowest:
             return ("SLOW", "#ef4444", "white")
+        if misses >= 2:
+            return ("COACH", "#eab308", "#111827")
         return None
 
     display_df["Turn Time"] = display_df["Turn Time"].map(lambda x: f"{x:.2f}")
@@ -1083,7 +1084,7 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
                 badge_x,
                 y + row_h / 2,
                 badge_label,
-                fontsize=6.8,
+                fontsize=6.4,
                 fontweight="bold",
                 color=badge_text,
                 ha="right",
