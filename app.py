@@ -7,6 +7,7 @@ import pandas as pd
 import psycopg2
 import streamlit as st
 from matplotlib.patches import FancyBboxPatch, Rectangle
+from streamlit_theme_provider import streamlit_theme_provider
 
 APP_VERSION = "v1.8.2.6"
 
@@ -39,6 +40,15 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+active_theme = streamlit_theme_provider()
+is_dark_theme = True
+if isinstance(active_theme, dict):
+    base_theme = str(active_theme.get("base", "")).lower()
+    if base_theme in {"light", "dark"}:
+        is_dark_theme = base_theme == "dark"
+
+sidebar_logo = "logo_dark.png" if is_dark_theme else "logo_light.png"
 
 
 # -----------------------------
@@ -1155,7 +1165,7 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
 logo_left, logo_mid, logo_right = st.sidebar.columns([1, 1.6, 1])
 with logo_mid:
     try:
-        st.image("logo.png", width=120)
+        st.image(sidebar_logo, width=120)
     except Exception:
         pass
 
