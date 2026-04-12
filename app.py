@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import psycopg2
 import streamlit as st
-from matplotlib.patches import Rectangle
+from matplotlib.patches import FancyBboxPatch, Rectangle
 
 APP_VERSION = "v1.8.2.6"
 
@@ -971,10 +971,44 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
     ]
 
     for i, (label, value, line1, line2, color) in enumerate(card_specs):
-        ax.add_patch(Rectangle((x_positions[i], card_y), card_w, card_h, facecolor=color, edgecolor="#cbd5e1", linewidth=1.2))
-        cx = x_positions[i] + card_w / 2
-        ax.text(cx, card_y + 0.15, label, fontsize=9.5, fontweight="bold", color="#111827", ha="center", va="center")
-        ax.text(cx, card_y + 0.10, value, fontsize=20, fontweight="bold", color="#111827", ha="center", va="center")
+        x0 = x_positions[i]
+        ax.add_patch(
+            FancyBboxPatch(
+                (x0 + 0.004, card_y - 0.006),
+                card_w,
+                card_h,
+                boxstyle="round,pad=0.008,rounding_size=0.02",
+                facecolor="#cbd5e1",
+                edgecolor="#cbd5e1",
+                linewidth=0,
+                alpha=0.35,
+            )
+        )
+        ax.add_patch(
+            FancyBboxPatch(
+                (x0, card_y),
+                card_w,
+                card_h,
+                boxstyle="round,pad=0.008,rounding_size=0.02",
+                facecolor=color,
+                edgecolor="#e5e7eb",
+                linewidth=1.2,
+            )
+        )
+        ax.add_patch(
+            FancyBboxPatch(
+                (x0 + 0.008, card_y + card_h - 0.05),
+                card_w - 0.016,
+                0.036,
+                boxstyle="round,pad=0.004,rounding_size=0.014",
+                facecolor=(1, 1, 1, 0.16),
+                edgecolor=(1, 1, 1, 0.0),
+                linewidth=0,
+            )
+        )
+        cx = x0 + card_w / 2
+        ax.text(cx, card_y + 0.145, label, fontsize=9.2, fontweight="bold", color="#111827", ha="center", va="center")
+        ax.text(cx, card_y + 0.089, value, fontsize=22, fontweight="bold", color="#111827", ha="center", va="center")
         if line1:
             ax.text(cx, card_y + 0.055, line1, fontsize=8.8, color="#111827", ha="center", va="center")
         if line2:
@@ -1014,7 +1048,7 @@ def build_whatsapp_png(title: str, subtitle: str, raw_df: pd.DataFrame) -> bytes
         if r["turn_time"] <= 40 and r["beverage_pct"] >= 19 and r["ppa"] >= 21:
             return ("ALL GREEN", "#22c55e", "#111827")
         if name == slowest:
-            return ("SLOW", "#ef4444", "white")
+            return ("SLOWEST TURN", "#ef4444", "white")
         if misses >= 2:
             return ("COACH", "#eab308", "#111827")
         return None
