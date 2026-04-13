@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 import matplotlib.pyplot as plt
 import pandas as pd
 import psycopg2
+from psycopg2 import errors as psycopg2_errors
 import streamlit as st
 from matplotlib.patches import FancyBboxPatch, Rectangle
 
@@ -164,23 +165,26 @@ def get_sync_status():
 def get_api_call_daily_summary(days=7):
     conn = get_db_connection()
     try:
-        df = pd.read_sql(
-            """
-            SELECT
-                utc_date,
-                COUNT(*) AS total_calls,
-                COUNT(*) FILTER (WHERE status_code = 429) AS rate_limited_calls,
-                COUNT(*) FILTER (WHERE endpoint = '/sales/checks') AS check_calls,
-                COUNT(*) FILTER (WHERE endpoint = '/general/employees') AS employee_calls,
-                COUNT(DISTINCT location_id) FILTER (WHERE location_id IS NOT NULL) AS stores_touched
-            FROM rosnet_api_call_log
-            WHERE utc_date >= (CURRENT_DATE AT TIME ZONE 'UTC')::date - (%s::int - 1)
-            GROUP BY utc_date
-            ORDER BY utc_date DESC
-            """,
-            conn,
-            params=(days,),
-        )
+        try:
+            df = pd.read_sql(
+                """
+                SELECT
+                    utc_date,
+                    COUNT(*) AS total_calls,
+                    COUNT(*) FILTER (WHERE status_code = 429) AS rate_limited_calls,
+                    COUNT(*) FILTER (WHERE endpoint = '/sales/checks') AS check_calls,
+                    COUNT(*) FILTER (WHERE endpoint = '/general/employees') AS employee_calls,
+                    COUNT(DISTINCT location_id) FILTER (WHERE location_id IS NOT NULL) AS stores_touched
+                FROM rosnet_api_call_log
+                WHERE utc_date >= (CURRENT_DATE AT TIME ZONE 'UTC')::date - (%s::int - 1)
+                GROUP BY utc_date
+                ORDER BY utc_date DESC
+                """,
+                conn,
+                params=(days,),
+            )
+        except psycopg2_errors.UndefinedTable:
+            return pd.DataFrame()
     finally:
         conn.close()
     return df
@@ -190,23 +194,26 @@ def get_api_call_daily_summary(days=7):
 def get_api_call_endpoint_summary(days=1):
     conn = get_db_connection()
     try:
-        df = pd.read_sql(
-            """
-            SELECT
-                utc_date,
-                endpoint,
-                COUNT(*) AS calls,
-                COUNT(*) FILTER (WHERE cursor_returned) AS paged_calls,
-                COUNT(*) FILTER (WHERE status_code = 429) AS rate_limited_calls,
-                COUNT(DISTINCT location_id) FILTER (WHERE location_id IS NOT NULL) AS stores_touched
-            FROM rosnet_api_call_log
-            WHERE utc_date >= (CURRENT_DATE AT TIME ZONE 'UTC')::date - (%s::int - 1)
-            GROUP BY utc_date, endpoint
-            ORDER BY utc_date DESC, calls DESC, endpoint
-            """,
-            conn,
-            params=(days,),
-        )
+        try:
+            df = pd.read_sql(
+                """
+                SELECT
+                    utc_date,
+                    endpoint,
+                    COUNT(*) AS calls,
+                    COUNT(*) FILTER (WHERE cursor_returned) AS paged_calls,
+                    COUNT(*) FILTER (WHERE status_code = 429) AS rate_limited_calls,
+                    COUNT(DISTINCT location_id) FILTER (WHERE location_id IS NOT NULL) AS stores_touched
+                FROM rosnet_api_call_log
+                WHERE utc_date >= (CURRENT_DATE AT TIME ZONE 'UTC')::date - (%s::int - 1)
+                GROUP BY utc_date, endpoint
+                ORDER BY utc_date DESC, calls DESC, endpoint
+                """,
+                conn,
+                params=(days,),
+            )
+        except psycopg2_errors.UndefinedTable:
+            return pd.DataFrame()
     finally:
         conn.close()
     return df
@@ -216,23 +223,26 @@ def get_api_call_endpoint_summary(days=1):
 def get_recent_rate_limit_events(limit=25):
     conn = get_db_connection()
     try:
-        df = pd.read_sql(
-            """
-            SELECT
-                occurred_at_utc,
-                endpoint,
-                location_id,
-                business_date,
-                retry_after,
-                page_number
-            FROM rosnet_api_call_log
-            WHERE status_code = 429
-            ORDER BY occurred_at_utc DESC
-            LIMIT %s
-            """,
-            conn,
-            params=(limit,),
-        )
+        try:
+            df = pd.read_sql(
+                """
+                SELECT
+                    occurred_at_utc,
+                    endpoint,
+                    location_id,
+                    business_date,
+                    retry_after,
+                    page_number
+                FROM rosnet_api_call_log
+                WHERE status_code = 429
+                ORDER BY occurred_at_utc DESC
+                LIMIT %s
+                """,
+                conn,
+                params=(limit,),
+            )
+        except psycopg2_errors.UndefinedTable:
+            return pd.DataFrame()
     finally:
         conn.close()
     return df
