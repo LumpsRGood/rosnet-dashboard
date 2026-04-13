@@ -122,6 +122,91 @@ def ensure_tables(conn):
             ADD COLUMN IF NOT EXISTS dine_in_sales numeric NOT NULL DEFAULT 0;
             """
         )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS rosnet_api_call_log (
+                id bigserial PRIMARY KEY,
+                occurred_at_utc timestamptz NOT NULL,
+                utc_date date NOT NULL,
+                endpoint text NOT NULL,
+                status_code integer,
+                location_id bigint,
+                business_date date,
+                start_date date,
+                end_date date,
+                cursor_used boolean NOT NULL DEFAULT false,
+                cursor_returned boolean NOT NULL DEFAULT false,
+                page_number integer,
+                retry_after integer,
+                created_at timestamptz NOT NULL DEFAULT now()
+            );
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_rosnet_api_call_log_utc_date
+            ON rosnet_api_call_log (utc_date, occurred_at_utc);
+            """
+        )
+        conn.commit()
+    finally:
+        cur.close()
+
+
+def persist_api_request_log(conn):
+    logs = api.consume_request_log()
+    if not logs:
+        return
+
+    cur = conn.cursor()
+    try:
+        for row in logs:
+            cur.execute(
+                """
+                INSERT INTO rosnet_api_call_log (
+                    occurred_at_utc,
+                    utc_date,
+                    endpoint,
+                    status_code,
+                    location_id,
+                    business_date,
+                    start_date,
+                    end_date,
+                    cursor_used,
+                    cursor_returned,
+                    page_number,
+                    retry_after
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s
+                );
+                """,
+                (
+                    row["occurred_at_utc"],
+                    str(row["occurred_at_utc"])[:10],
+                    row["endpoint"],
+                    row["status_code"],
+                    int(row["location_id"]) if row.get("location_id") not in (None, "") else None,
+                    row.get("business_date"),
+                    row.get("start_date"),
+                    row.get("end_date"),
+                    bool(row.get("cursor_used")),
+                    bool(row.get("cursor_returned")),
+                    row.get("page_number"),
+                    row.get("retry_after"),
+                ),
+            )
         conn.commit()
     finally:
         cur.close()
@@ -606,8 +691,10 @@ def main():
 
     conn = get_conn()
     ensure_tables(conn)
+    api.reset_request_log()
 
     loc_map = build_location_map()
+    persist_api_request_log(conn)
     if not loc_map:
         raise RuntimeError("No locations returned from Rosnet.")
 
@@ -622,6 +709,7 @@ def main():
     print(f"Stores selected this run: {len(stores_to_sync)}")
 
     bev_ids = api.get_beverage_category_ids()
+    persist_api_request_log(conn)
 
     total_rows = 0
     total_store_days = 0
@@ -633,7 +721,9 @@ def main():
 
             try:
                 emp_map = api.get_employees_map(int(store_id))
+                persist_api_request_log(conn)
             except api.RateLimitExceeded as e:
+                persist_api_request_log(conn)
                 wait_for = max(getattr(e, "retry_after", 30), 30)
                 rate_limit_events += 1
                 print(f"  rate limited getting employee map, sleeping {wait_for}s")
@@ -644,6 +734,7 @@ def main():
                     break
                 continue
             except Exception as e:
+                persist_api_request_log(conn)
                 print(f"  failed employee map: {e}")
                 mark_progress(conn, store_id, "error", f"employee map error: {e}")
                 continue
@@ -657,7 +748,9 @@ def main():
 
                 try:
                     df = fetch_store_day(int(store_id), day_str, emp_map, bev_ids)
+                    persist_api_request_log(conn)
                 except api.RateLimitExceeded as e:
+                    persist_api_request_log(conn)
                     wait_for = max(getattr(e, "retry_after", 30), 30)
                     rate_limit_events += 1
                     print(f"    rate limited, sleeping {wait_for}s and skipping this store-day")
@@ -669,6 +762,7 @@ def main():
                         return
                     continue
                 except Exception as e:
+                    persist_api_request_log(conn)
                     print(f"    fetch error: {e}")
                     mark_progress(conn, store_id, "error", f"fetch error: {e}")
                     store_success = False
@@ -713,6 +807,7 @@ def main():
                 )
 
     finally:
+        persist_api_request_log(conn)
         conn.close()
 
     print("\nDone.")

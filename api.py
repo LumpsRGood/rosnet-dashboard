@@ -3,6 +3,7 @@ import requests
 import base64
 import pandas as pd
 from datetime import datetime, timedelta
+from datetime import timezone
 from dotenv import load_dotenv
 import time
 import logging
@@ -13,6 +14,8 @@ load_dotenv()
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+REQUEST_LOG = []
 
 class RateLimitExceeded(Exception):
     def __init__(self, retry_after):
@@ -48,6 +51,16 @@ def _get_headers():
         
     return headers
 
+
+def reset_request_log():
+    REQUEST_LOG.clear()
+
+
+def consume_request_log():
+    logged = list(REQUEST_LOG)
+    REQUEST_LOG.clear()
+    return logged
+
 def _make_request(endpoint, params=None):
     """
     Makes a request to the Rosnet API, handling rate limits (429) and pagination automatically.
@@ -62,10 +75,31 @@ def _make_request(endpoint, params=None):
         params = {}
     
     all_results = []
+    page_number = 0
     
     while True:
+        page_number += 1
         try:
             response = requests.get(url, headers=headers, params=params)
+            status_code = response.status_code
+            retry_after = response.headers.get("Retry-After")
+            cursor = response.headers.get("Cursor")
+
+            REQUEST_LOG.append(
+                {
+                    "occurred_at_utc": datetime.now(timezone.utc).isoformat(),
+                    "endpoint": endpoint,
+                    "status_code": status_code,
+                    "location_id": params.get("locationId"),
+                    "business_date": params.get("businessDate"),
+                    "start_date": params.get("startDate"),
+                    "end_date": params.get("endDate"),
+                    "cursor_used": bool(params.get("cursor")),
+                    "cursor_returned": bool(cursor),
+                    "page_number": page_number,
+                    "retry_after": int(retry_after) if retry_after and str(retry_after).isdigit() else None,
+                }
+            )
             
             # Handle rate limits
             if response.status_code == 429:
@@ -85,7 +119,6 @@ def _make_request(endpoint, params=None):
                 all_results.append(data)
                 
             # Check for pagination cursor
-            cursor = response.headers.get("Cursor")
             if cursor:
                 params["cursor"] = cursor
             else:

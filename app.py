@@ -160,6 +160,84 @@ def get_sync_status():
     )
 
 
+@st.cache_data(ttl=120)
+def get_api_call_daily_summary(days=7):
+    conn = get_db_connection()
+    try:
+        df = pd.read_sql(
+            """
+            SELECT
+                utc_date,
+                COUNT(*) AS total_calls,
+                COUNT(*) FILTER (WHERE status_code = 429) AS rate_limited_calls,
+                COUNT(*) FILTER (WHERE endpoint = '/sales/checks') AS check_calls,
+                COUNT(*) FILTER (WHERE endpoint = '/general/employees') AS employee_calls,
+                COUNT(DISTINCT location_id) FILTER (WHERE location_id IS NOT NULL) AS stores_touched
+            FROM rosnet_api_call_log
+            WHERE utc_date >= (CURRENT_DATE AT TIME ZONE 'UTC')::date - (%s::int - 1)
+            GROUP BY utc_date
+            ORDER BY utc_date DESC
+            """,
+            conn,
+            params=(days,),
+        )
+    finally:
+        conn.close()
+    return df
+
+
+@st.cache_data(ttl=120)
+def get_api_call_endpoint_summary(days=1):
+    conn = get_db_connection()
+    try:
+        df = pd.read_sql(
+            """
+            SELECT
+                utc_date,
+                endpoint,
+                COUNT(*) AS calls,
+                COUNT(*) FILTER (WHERE cursor_returned) AS paged_calls,
+                COUNT(*) FILTER (WHERE status_code = 429) AS rate_limited_calls,
+                COUNT(DISTINCT location_id) FILTER (WHERE location_id IS NOT NULL) AS stores_touched
+            FROM rosnet_api_call_log
+            WHERE utc_date >= (CURRENT_DATE AT TIME ZONE 'UTC')::date - (%s::int - 1)
+            GROUP BY utc_date, endpoint
+            ORDER BY utc_date DESC, calls DESC, endpoint
+            """,
+            conn,
+            params=(days,),
+        )
+    finally:
+        conn.close()
+    return df
+
+
+@st.cache_data(ttl=120)
+def get_recent_rate_limit_events(limit=25):
+    conn = get_db_connection()
+    try:
+        df = pd.read_sql(
+            """
+            SELECT
+                occurred_at_utc,
+                endpoint,
+                location_id,
+                business_date,
+                retry_after,
+                page_number
+            FROM rosnet_api_call_log
+            WHERE status_code = 429
+            ORDER BY occurred_at_utc DESC
+            LIMIT %s
+            """,
+            conn,
+            params=(limit,),
+        )
+    finally:
+        conn.close()
+    return df
+
+
 @st.cache_data(ttl=300)
 def get_data_from_db(start_date, end_date, locations=None):
     conn = get_db_connection()
@@ -1279,11 +1357,12 @@ if df.empty:
 # -----------------------------
 # TABS
 # -----------------------------
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📊 Overview",
     "👨‍🍳 Server Performance",
     "🚀 Coming Attractions",
     "🆘 Known Gremlins",
+    "📡 API Usage",
     "🧾 Dataset"
 ])
 
@@ -1632,6 +1711,36 @@ with tab4:
     )
 
 with tab5:
+    st.markdown("## 📡 API Usage")
+    st.markdown("Temporary UTC-based Rosnet request monitor for rate-limit tuning.")
+
+    daily_api_df = get_api_call_daily_summary(days=7)
+    endpoint_api_df = get_api_call_endpoint_summary(days=2)
+    recent_429_df = get_recent_rate_limit_events(limit=25)
+
+    if daily_api_df.empty:
+        st.info("No Rosnet API usage has been logged yet. Run a sync after this update to start collecting counts.")
+    else:
+        latest_day = daily_api_df.iloc[0]
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Latest UTC Day", str(latest_day["utc_date"]))
+        k2.metric("Total Calls", int(latest_day["total_calls"]))
+        k3.metric("/sales/checks Calls", int(latest_day["check_calls"]))
+        k4.metric("429 Responses", int(latest_day["rate_limited_calls"]))
+
+        st.markdown("### Daily Totals (UTC)")
+        st.dataframe(daily_api_df, use_container_width=True, height=320)
+
+        st.markdown("### Endpoint Breakdown (Last 2 UTC Days)")
+        st.dataframe(endpoint_api_df, use_container_width=True, height=280)
+
+        st.markdown("### Recent 429 Events")
+        if recent_429_df.empty:
+            st.caption("No recent rate-limit responses logged.")
+        else:
+            st.dataframe(recent_429_df, use_container_width=True, height=260)
+
+with tab6:
     st.markdown("### Combined Stored Dataset")
     st.markdown("Raw diagnostic data view. This tab will be removed in a future update.")
     st.dataframe(df, use_container_width=True, height=600)
