@@ -791,9 +791,19 @@ def main():
     if bev_ids:
         print(f"Loaded {len(bev_ids)} beverage categories from cache")
     else:
-        bev_ids = api.get_beverage_category_ids()
-        save_beverage_category_ids(conn, bev_ids)
-        persist_api_request_log(conn)
+        try:
+            bev_ids = api.get_beverage_category_ids()
+            save_beverage_category_ids(conn, bev_ids)
+            persist_api_request_log(conn)
+            print(f"Fetched {len(bev_ids)} beverage categories from Rosnet")
+        except api.RateLimitExceeded as e:
+            persist_api_request_log(conn)
+            bev_ids = set()
+            wait_for = max(getattr(e, "retry_after", 30), 30)
+            print(
+                f"Rate limited getting beverage categories, continuing without cached category IDs "
+                f"(retry_after={wait_for}s)."
+            )
 
     total_rows = 0
     total_store_days = 0
