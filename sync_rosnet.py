@@ -31,12 +31,6 @@ MAX_STORES_PER_RUN = int(max_stores_raw) if max_stores_raw and max_stores_raw.st
 
 target_store_raw = os.getenv("TARGET_STORE")
 TARGET_STORE = int(target_store_raw) if target_store_raw and target_store_raw.strip() else None
-target_stores_raw = os.getenv("TARGET_STORES", "")
-TARGET_STORES = tuple(
-    int(part.strip())
-    for part in target_stores_raw.split(",")
-    if part.strip()
-)
 
 request_delay_raw = os.getenv("REQUEST_DELAY_SECONDS")
 REQUEST_DELAY_SECONDS = float(request_delay_raw) if request_delay_raw and request_delay_raw.strip() else 3.0
@@ -122,100 +116,6 @@ def ensure_tables(conn):
             ADD COLUMN IF NOT EXISTS dine_in_sales numeric NOT NULL DEFAULT 0;
             """
         )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS rosnet_api_call_log (
-                id bigserial PRIMARY KEY,
-                occurred_at_utc timestamptz NOT NULL,
-                utc_date date NOT NULL,
-                endpoint text NOT NULL,
-                status_code integer,
-                location_id bigint,
-                business_date date,
-                start_date date,
-                end_date date,
-                cursor_used boolean NOT NULL DEFAULT false,
-                cursor_returned boolean NOT NULL DEFAULT false,
-                page_number integer,
-                retry_after integer,
-                created_at timestamptz NOT NULL DEFAULT now()
-            );
-            """
-        )
-        cur.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_rosnet_api_call_log_utc_date
-            ON rosnet_api_call_log (utc_date, occurred_at_utc);
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS rosnet_beverage_category_cache (
-                category_id bigint PRIMARY KEY,
-                category_name text,
-                updated_at timestamptz NOT NULL DEFAULT now()
-            );
-            """
-        )
-        conn.commit()
-    finally:
-        cur.close()
-
-
-def persist_api_request_log(conn):
-    logs = api.consume_request_log()
-    if not logs:
-        return
-
-    cur = conn.cursor()
-    try:
-        for row in logs:
-            cur.execute(
-                """
-                INSERT INTO rosnet_api_call_log (
-                    occurred_at_utc,
-                    utc_date,
-                    endpoint,
-                    status_code,
-                    location_id,
-                    business_date,
-                    start_date,
-                    end_date,
-                    cursor_used,
-                    cursor_returned,
-                    page_number,
-                    retry_after
-                )
-                VALUES (
-                    %s,
-                    %s,
-                    %s,
-                    %s,
-                    %s,
-                    %s,
-                    %s,
-                    %s,
-                    %s,
-                    %s,
-                    %s,
-                    %s
-                );
-                """,
-                (
-                    row["occurred_at_utc"],
-                    str(row["occurred_at_utc"])[:10],
-                    row["endpoint"],
-                    row["status_code"],
-                    int(row["location_id"]) if row.get("location_id") not in (None, "") else None,
-                    row.get("business_date"),
-                    row.get("start_date"),
-                    row.get("end_date"),
-                    bool(row.get("cursor_used")),
-                    bool(row.get("cursor_returned")),
-                    row.get("page_number"),
-                    row.get("retry_after"),
-                ),
-            )
         conn.commit()
     finally:
         cur.close()
@@ -232,72 +132,6 @@ def build_location_map():
         if l_id is not None:
             loc_map[int(l_id)] = l_name
     return loc_map
-
-
-def load_location_map_from_db(conn):
-    cur = conn.cursor()
-    try:
-        cur.execute(
-            """
-            SELECT store_number, store_name
-            FROM sync_progress
-            WHERE store_number IS NOT NULL
-              AND store_name IS NOT NULL
-            ORDER BY store_number
-            """
-        )
-        rows = cur.fetchall()
-    finally:
-        cur.close()
-
-    return {
-        int(store_number): store_name
-        for store_number, store_name in rows
-    }
-
-
-def load_beverage_category_ids_from_db(conn):
-    cur = conn.cursor()
-    try:
-        cur.execute(
-            """
-            SELECT category_id
-            FROM rosnet_beverage_category_cache
-            WHERE category_id IS NOT NULL
-            ORDER BY category_id
-            """
-        )
-        rows = cur.fetchall()
-    finally:
-        cur.close()
-
-    return {int(category_id) for (category_id,) in rows}
-
-
-def save_beverage_category_ids(conn, category_ids):
-    if not category_ids:
-        return
-
-    cur = conn.cursor()
-    try:
-        cur.execute("DELETE FROM rosnet_beverage_category_cache;")
-        for category_id in sorted(category_ids):
-            cur.execute(
-                """
-                INSERT INTO rosnet_beverage_category_cache (
-                    category_id,
-                    updated_at
-                )
-                VALUES (%s, now())
-                ON CONFLICT (category_id)
-                DO UPDATE SET
-                    updated_at = now();
-                """,
-                (int(category_id),),
-            )
-        conn.commit()
-    finally:
-        cur.close()
 
 
 def seed_sync_progress(conn, loc_map):
@@ -323,23 +157,7 @@ def seed_sync_progress(conn, loc_map):
 def select_stores_for_run(conn, target_date, max_stores):
     cur = conn.cursor()
     try:
-        if TARGET_STORES:
-            placeholders = ",".join(["%s"] * len(TARGET_STORES))
-            cur.execute(
-                f"""
-                SELECT store_number, store_name, last_synced_date
-                FROM sync_progress
-                WHERE store_number IN ({placeholders})
-                  AND (last_synced_date IS NULL OR last_synced_date < %s)
-                ORDER BY
-                    CASE WHEN last_synced_date IS NULL THEN 0 ELSE 1 END,
-                    last_synced_date NULLS FIRST,
-                    store_number
-                LIMIT %s
-                """,
-                (*TARGET_STORES, target_date, max_stores),
-            )
-        elif TARGET_STORE is not None:
+        if TARGET_STORE is not None:
             cur.execute(
                 """
                 SELECT store_number, store_name, last_synced_date
@@ -758,22 +576,13 @@ def upsert_zero_guest_rows(conn, alerts_df, store_id, business_date):
 def main():
     print(f"Sync window: {start_date} to {end_date}")
     print(f"Max stores this run: {MAX_STORES_PER_RUN}")
-    if TARGET_STORES:
-        print(f"Target stores: {', '.join(str(s) for s in TARGET_STORES)}")
-    else:
-        print(f"Target store: {TARGET_STORE if TARGET_STORE is not None else 'all eligible stores'}")
+    print(f"Target store: {TARGET_STORE if TARGET_STORE is not None else 'all eligible stores'}")
     print(f"Request delay: {REQUEST_DELAY_SECONDS}s")
 
     conn = get_conn()
     ensure_tables(conn)
-    api.reset_request_log()
 
-    loc_map = load_location_map_from_db(conn)
-    if loc_map:
-        print(f"Loaded {len(loc_map)} locations from sync_progress")
-    else:
-        loc_map = build_location_map()
-        persist_api_request_log(conn)
+    loc_map = build_location_map()
     if not loc_map:
         raise RuntimeError("No locations returned from Rosnet.")
 
@@ -787,23 +596,7 @@ def main():
 
     print(f"Stores selected this run: {len(stores_to_sync)}")
 
-    bev_ids = load_beverage_category_ids_from_db(conn)
-    if bev_ids:
-        print(f"Loaded {len(bev_ids)} beverage categories from cache")
-    else:
-        try:
-            bev_ids = api.get_beverage_category_ids()
-            save_beverage_category_ids(conn, bev_ids)
-            persist_api_request_log(conn)
-            print(f"Fetched {len(bev_ids)} beverage categories from Rosnet")
-        except api.RateLimitExceeded as e:
-            persist_api_request_log(conn)
-            bev_ids = set()
-            wait_for = max(getattr(e, "retry_after", 30), 30)
-            print(
-                f"Rate limited getting beverage categories, continuing without cached category IDs "
-                f"(retry_after={wait_for}s)."
-            )
+    bev_ids = api.get_beverage_category_ids()
 
     total_rows = 0
     total_store_days = 0
@@ -815,10 +608,7 @@ def main():
 
             try:
                 emp_map = api.get_employees_map(int(store_id))
-                print(f"  employee map: fetched live ({len(emp_map)} ids)")
-                persist_api_request_log(conn)
             except api.RateLimitExceeded as e:
-                persist_api_request_log(conn)
                 wait_for = max(getattr(e, "retry_after", 30), 30)
                 rate_limit_events += 1
                 print(f"  rate limited getting employee map, sleeping {wait_for}s")
@@ -829,7 +619,6 @@ def main():
                     break
                 continue
             except Exception as e:
-                persist_api_request_log(conn)
                 print(f"  failed employee map: {e}")
                 mark_progress(conn, store_id, "error", f"employee map error: {e}")
                 continue
@@ -843,9 +632,7 @@ def main():
 
                 try:
                     df = fetch_store_day(int(store_id), day_str, emp_map, bev_ids)
-                    persist_api_request_log(conn)
                 except api.RateLimitExceeded as e:
-                    persist_api_request_log(conn)
                     wait_for = max(getattr(e, "retry_after", 30), 30)
                     rate_limit_events += 1
                     print(f"    rate limited, sleeping {wait_for}s and skipping this store-day")
@@ -857,7 +644,6 @@ def main():
                         return
                     continue
                 except Exception as e:
-                    persist_api_request_log(conn)
                     print(f"    fetch error: {e}")
                     mark_progress(conn, store_id, "error", f"fetch error: {e}")
                     store_success = False
@@ -902,7 +688,6 @@ def main():
                 )
 
     finally:
-        persist_api_request_log(conn)
         conn.close()
 
     print("\nDone.")

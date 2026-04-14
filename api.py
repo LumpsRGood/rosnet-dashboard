@@ -3,7 +3,6 @@ import requests
 import base64
 import pandas as pd
 from datetime import datetime, timedelta
-from datetime import timezone
 from dotenv import load_dotenv
 import time
 import logging
@@ -14,9 +13,6 @@ load_dotenv()
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-REQUEST_LOG = []
-LAST_REQUEST_TS = None
 
 class RateLimitExceeded(Exception):
     def __init__(self, retry_after):
@@ -29,8 +25,6 @@ API_KEY = os.getenv("ROSNET_API_KEY")
 CLIENT_ID = os.getenv("ROSNET_CLIENT_ID")
 
 BASE_URL = "https://api.rosnet.com"
-api_request_delay_raw = os.getenv("API_REQUEST_DELAY_SECONDS")
-API_REQUEST_DELAY_SECONDS = float(api_request_delay_raw) if api_request_delay_raw and api_request_delay_raw.strip() else 0.7
 
 # Check if we should run in mock mode
 MOCK_MODE = not (API_USER and API_KEY)
@@ -54,33 +48,6 @@ def _get_headers():
         
     return headers
 
-
-def reset_request_log():
-    REQUEST_LOG.clear()
-
-
-def consume_request_log():
-    logged = list(REQUEST_LOG)
-    REQUEST_LOG.clear()
-    return logged
-
-
-def _respect_request_throttle():
-    global LAST_REQUEST_TS
-
-    if API_REQUEST_DELAY_SECONDS <= 0:
-        LAST_REQUEST_TS = time.monotonic()
-        return
-
-    now = time.monotonic()
-    if LAST_REQUEST_TS is not None:
-        elapsed = now - LAST_REQUEST_TS
-        remaining = API_REQUEST_DELAY_SECONDS - elapsed
-        if remaining > 0:
-            time.sleep(remaining)
-
-    LAST_REQUEST_TS = time.monotonic()
-
 def _make_request(endpoint, params=None):
     """
     Makes a request to the Rosnet API, handling rate limits (429) and pagination automatically.
@@ -95,32 +62,10 @@ def _make_request(endpoint, params=None):
         params = {}
     
     all_results = []
-    page_number = 0
     
     while True:
-        page_number += 1
         try:
-            _respect_request_throttle()
             response = requests.get(url, headers=headers, params=params)
-            status_code = response.status_code
-            retry_after = response.headers.get("Retry-After")
-            cursor = response.headers.get("Cursor")
-
-            REQUEST_LOG.append(
-                {
-                    "occurred_at_utc": datetime.now(timezone.utc).isoformat(),
-                    "endpoint": endpoint,
-                    "status_code": status_code,
-                    "location_id": params.get("locationId"),
-                    "business_date": params.get("businessDate"),
-                    "start_date": params.get("startDate"),
-                    "end_date": params.get("endDate"),
-                    "cursor_used": bool(params.get("cursor")),
-                    "cursor_returned": bool(cursor),
-                    "page_number": page_number,
-                    "retry_after": int(retry_after) if retry_after and str(retry_after).isdigit() else None,
-                }
-            )
             
             # Handle rate limits
             if response.status_code == 429:
@@ -140,6 +85,7 @@ def _make_request(endpoint, params=None):
                 all_results.append(data)
                 
             # Check for pagination cursor
+            cursor = response.headers.get("Cursor")
             if cursor:
                 params["cursor"] = cursor
             else:
