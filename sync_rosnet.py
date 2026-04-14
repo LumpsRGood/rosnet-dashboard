@@ -148,6 +148,15 @@ def ensure_tables(conn):
             ON rosnet_api_call_log (utc_date, occurred_at_utc);
             """
         )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS rosnet_beverage_category_cache (
+                category_id bigint PRIMARY KEY,
+                category_name text,
+                updated_at timestamptz NOT NULL DEFAULT now()
+            );
+            """
+        )
         conn.commit()
     finally:
         cur.close()
@@ -245,6 +254,50 @@ def load_location_map_from_db(conn):
         int(store_number): store_name
         for store_number, store_name in rows
     }
+
+
+def load_beverage_category_ids_from_db(conn):
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT category_id
+            FROM rosnet_beverage_category_cache
+            WHERE category_id IS NOT NULL
+            ORDER BY category_id
+            """
+        )
+        rows = cur.fetchall()
+    finally:
+        cur.close()
+
+    return {int(category_id) for (category_id,) in rows}
+
+
+def save_beverage_category_ids(conn, category_ids):
+    if not category_ids:
+        return
+
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM rosnet_beverage_category_cache;")
+        for category_id in sorted(category_ids):
+            cur.execute(
+                """
+                INSERT INTO rosnet_beverage_category_cache (
+                    category_id,
+                    updated_at
+                )
+                VALUES (%s, now())
+                ON CONFLICT (category_id)
+                DO UPDATE SET
+                    updated_at = now();
+                """,
+                (int(category_id),),
+            )
+        conn.commit()
+    finally:
+        cur.close()
 
 
 def seed_sync_progress(conn, loc_map):
@@ -734,8 +787,13 @@ def main():
 
     print(f"Stores selected this run: {len(stores_to_sync)}")
 
-    bev_ids = api.get_beverage_category_ids()
-    persist_api_request_log(conn)
+    bev_ids = load_beverage_category_ids_from_db(conn)
+    if bev_ids:
+        print(f"Loaded {len(bev_ids)} beverage categories from cache")
+    else:
+        bev_ids = api.get_beverage_category_ids()
+        save_beverage_category_ids(conn, bev_ids)
+        persist_api_request_log(conn)
 
     total_rows = 0
     total_store_days = 0
