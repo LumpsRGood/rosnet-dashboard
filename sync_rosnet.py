@@ -148,24 +148,6 @@ def ensure_tables(conn):
             ON rosnet_api_call_log (utc_date, occurred_at_utc);
             """
         )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS rosnet_employee_map_cache (
-                store_number bigint NOT NULL,
-                cache_date date NOT NULL,
-                employee_id bigint NOT NULL,
-                employee_name text NOT NULL,
-                updated_at timestamptz NOT NULL DEFAULT now(),
-                PRIMARY KEY (store_number, cache_date, employee_id)
-            );
-            """
-        )
-        cur.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_rosnet_employee_map_cache_lookup
-            ON rosnet_employee_map_cache (store_number, cache_date);
-            """
-        )
         conn.commit()
     finally:
         cur.close()
@@ -228,85 +210,6 @@ def persist_api_request_log(conn):
         conn.commit()
     finally:
         cur.close()
-
-
-def load_cached_employee_map(conn, store_id, cache_date):
-    cur = conn.cursor()
-    try:
-        cur.execute(
-            """
-            SELECT employee_id, employee_name
-            FROM rosnet_employee_map_cache
-            WHERE store_number = %s
-              AND cache_date = %s
-            """,
-            (int(store_id), cache_date),
-        )
-        rows = cur.fetchall()
-    finally:
-        cur.close()
-
-    if not rows:
-        return {}
-
-    return {int(employee_id): employee_name for employee_id, employee_name in rows}
-
-
-def save_employee_map_cache(conn, store_id, cache_date, emp_map):
-    if not emp_map:
-        return
-
-    cur = conn.cursor()
-    try:
-        cur.execute(
-            """
-            DELETE FROM rosnet_employee_map_cache
-            WHERE store_number = %s
-              AND cache_date = %s
-            """,
-            (int(store_id), cache_date),
-        )
-
-        for employee_id, employee_name in emp_map.items():
-            if employee_id in (None, "") or employee_name in (None, ""):
-                continue
-            try:
-                employee_id_int = int(employee_id)
-            except (TypeError, ValueError):
-                continue
-
-            cur.execute(
-                """
-                INSERT INTO rosnet_employee_map_cache (
-                    store_number,
-                    cache_date,
-                    employee_id,
-                    employee_name,
-                    updated_at
-                )
-                VALUES (%s, %s, %s, %s, now())
-                ON CONFLICT (store_number, cache_date, employee_id)
-                DO UPDATE SET
-                    employee_name = EXCLUDED.employee_name,
-                    updated_at = now()
-                """,
-                (int(store_id), cache_date, employee_id_int, str(employee_name)),
-            )
-        conn.commit()
-    finally:
-        cur.close()
-
-
-def get_or_fetch_employee_map(conn, store_id, cache_date):
-    cached = load_cached_employee_map(conn, store_id, cache_date)
-    if cached:
-        print(f"  employee map: cache hit ({len(cached)} ids)")
-        return cached, "cache"
-
-    emp_map = api.get_employees_map(int(store_id))
-    save_employee_map_cache(conn, store_id, cache_date, emp_map)
-    print(f"  employee map: fetched live ({len(emp_map)} ids)")
-    return emp_map, "live"
 
 
 def build_location_map():
@@ -817,7 +720,8 @@ def main():
             print(f"\nSyncing {store_id} - {store_name} (last synced: {last_synced_date})")
 
             try:
-                emp_map, emp_map_source = get_or_fetch_employee_map(conn, int(store_id), end_date)
+                emp_map = api.get_employees_map(int(store_id))
+                print(f"  employee map: fetched live ({len(emp_map)} ids)")
                 persist_api_request_log(conn)
             except api.RateLimitExceeded as e:
                 persist_api_request_log(conn)
