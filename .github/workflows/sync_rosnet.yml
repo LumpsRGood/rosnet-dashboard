@@ -11,7 +11,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 concurrency:
-  group: rosnet-sync
+  group: rosnet-sync-global
   cancel-in-progress: false
 
 jobs:
@@ -46,6 +46,7 @@ jobs:
           SYNC_LOOKBACK_DAYS: ${{ secrets.SYNC_LOOKBACK_DAYS }}
           MAX_STORES_PER_RUN: ${{ secrets.MAX_STORES_PER_RUN }}
           REQUEST_DELAY_SECONDS: ${{ secrets.REQUEST_DELAY_SECONDS }}
+          API_REQUEST_DELAY_SECONDS: ${{ secrets.API_REQUEST_DELAY_SECONDS }}
           MAX_RATE_LIMIT_EVENTS: ${{ secrets.MAX_RATE_LIMIT_EVENTS }}
         run: |
           python sync_rosnet.py
