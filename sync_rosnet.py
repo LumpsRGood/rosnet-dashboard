@@ -225,6 +225,28 @@ def build_location_map():
     return loc_map
 
 
+def load_location_map_from_db(conn):
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT store_number, store_name
+            FROM sync_progress
+            WHERE store_number IS NOT NULL
+              AND store_name IS NOT NULL
+            ORDER BY store_number
+            """
+        )
+        rows = cur.fetchall()
+    finally:
+        cur.close()
+
+    return {
+        int(store_number): store_name
+        for store_number, store_name in rows
+    }
+
+
 def seed_sync_progress(conn, loc_map):
     cur = conn.cursor()
     try:
@@ -693,8 +715,12 @@ def main():
     ensure_tables(conn)
     api.reset_request_log()
 
-    loc_map = build_location_map()
-    persist_api_request_log(conn)
+    loc_map = load_location_map_from_db(conn)
+    if loc_map:
+        print(f"Loaded {len(loc_map)} locations from sync_progress")
+    else:
+        loc_map = build_location_map()
+        persist_api_request_log(conn)
     if not loc_map:
         raise RuntimeError("No locations returned from Rosnet.")
 
